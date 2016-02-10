@@ -23,6 +23,34 @@ bool is_logged(const char * command) {
 
 static void do_(USER *u, const char *arg) {} // Do nothing.
 
+static void do_alarm(USER *u, const char *arg) {
+    char pulse[8];
+    arg = first_arg(arg, pulse, sizeof(pulse));
+    
+    int pulse_int;
+    if (!str2int(&pulse_int, pulse, 10) || pulse_int < 0) {
+        u->sendf("Alarm length '%s' is neither a positive integer nor zero.\n\r", pulse);
+        return;
+    }
+
+    int shift_int = 0;
+    if (strlen(arg) > 0 && !str2int(&shift_int, arg, 10)) {
+        u->sendf("Alarm shift '%s' is not an integer.\n\r", arg);
+        return;
+    }
+
+    u->manager->set(u->get_id(), "alarm_pulse", pulse_int);
+    u->manager->set(u->get_id(), "alarm_shift", shift_int);
+
+    if (pulse_int == 0) {
+        u->send("Alarm disabled.\n\r");
+        return;
+    }
+
+    if (shift_int != 0) u->sendf("Alarm set for every %d. pulse (correction %d).\n\r", pulse_int, shift_int);
+    else                u->sendf("Alarm set for every %d. pulse.\n\r", pulse_int);
+}
+
 static void do_connect(USER *u, const char *arg) {
     char host[256];
     char port[8];
@@ -287,6 +315,7 @@ static void do_switch(USER *u, const char *arg) {
 
 const struct fun_type fun_table[] = {
     { "",           "Bust a prompt.",                                      do_,           ROLE_NONE, false },
+    { "alarm",      "Sets an alarm for the defined number of pulses.",     do_alarm,      ROLE_AUTH, false },
     { "connect",    "Connect a new shell to a remote host/port.",          do_connect,    ROLE_AUTH, true  },
     { "disconnect", "Disconnect a user or a shell by its ID.",             do_disconnect, ROLE_SU,   true  },
     { "exit",       "Close the connection.",                               do_exit,       ROLE_NONE, false },

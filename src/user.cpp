@@ -16,6 +16,24 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     bool ignored = (manager->ignored.count(desc) > 0);
     manager->ignored.erase(desc);
 
+    int alarm_pulse = ins->vs.geti("alarm_pulse");
+    int alarm_shift = ins->vs.geti("alarm_shift");
+
+    size_t shift = 0;
+    if (alarm_pulse > 0) {
+        if (alarm_shift >= alarm_pulse) alarm_shift %= alarm_pulse;
+        else if (alarm_shift < 0) {
+            alarm_shift*= -1;
+            alarm_shift = ((alarm_shift-1) % alarm_pulse) + 1;
+            alarm_shift = alarm_pulse - alarm_shift;
+        }
+        shift = alarm_shift;
+    }
+
+    if (alarm_pulse > 0 && manager->get_pulse() % alarm_pulse == shift) {
+        u->sendf("MultiPlay :: Alarm on pulse %d went off with shift %d!\n\r", alarm_pulse, alarm_shift);
+    }
+
     // First copy the incoming bytes into the user's personal buffer.
     if (manager->ibuf.count(desc) > 0) {
         auto ibd = &manager->ibuf[desc];
@@ -24,22 +42,16 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     }
 
     // If the user is not frozen, process its input.
+    bool prepend_newline = false;
     if (!ignored) {
         size_t input_before = u->ibuf.size();
-        u->process_input();
+        bool command_executed = u->process_input();
         size_t input_after = u->ibuf.size();
+        prepend_newline = (input_after == input_before);
 
         // Finally bust a prompt if needed and clear the higher level output buffer.
         size_t osz = u->obuf.size();
-        if (osz > 0 || input_after != input_before) {
-            /*
-            if (input_after == input_before
-            &&  u->obuf.back() != '\r'
-            &&  u->obuf.back() != '\n') {
-                u->obuf.push_back('\n');
-                u->obuf.push_back('\r');
-            }
-            */
+        if (osz > 0 || command_executed) {
             u->send_prompt();
         }
     }
@@ -55,7 +67,13 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
                 log("User %d is frozen while receiving %lu byte%s.", u->id, ssz, ssz == 1 ? "" : "s");
             }
         }
-        obd->insert(std::end(*obd), std::begin(u->obuf), std::end(u->obuf));
+        if (u->obuf.size() > 0) {
+            if (prepend_newline && u->has_prompt()) {
+                obd->push_back('\n');
+                obd->push_back('\r');
+            }
+            obd->insert(std::end(*obd), std::begin(u->obuf), std::end(u->obuf));
+        }
     }
     u->obuf.clear();
     
@@ -80,11 +98,11 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     } else u->greet_countdown--;
 }
 
-void USER::process_input() {
+bool USER::process_input() {
     std::vector<unsigned char> *bytes = &ibuf;
     size_t sz = bytes->size();
 
-    if (sz == 0 || paralyzed) return;
+    if (sz == 0 || paralyzed) return false;
 
     if (server) {
         VARSET vs;
@@ -104,7 +122,7 @@ void USER::process_input() {
         }
         
         bytes->clear();
-        return;
+        return false;
     }
     
     //if (options.verbose) {
@@ -120,7 +138,7 @@ void USER::process_input() {
             write_to_buffer(&obuf, "Put a lid on it ! ! !\n\r");
             paralyzed = true;
         }
-        return;
+        return false;
     }
 
     sz = bytes->size();
@@ -160,7 +178,7 @@ void USER::process_input() {
                         ins->user->sendf("%s: %s\n\r", tag.c_str(), line.c_str());
                     }                    
                 }
-                return;
+                return false;
             }
         }
     }
@@ -188,7 +206,8 @@ void USER::process_input() {
         interpret(command_name, args);
         greet_countdown = -1;
     }
-    else send("Command line too long!\n\r");    
+    else send("Command line too long!\n\r");
+    return true;
 }
 
 bool USER::interpret(const char* command, const char* arg) {

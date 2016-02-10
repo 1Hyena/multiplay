@@ -23,6 +23,7 @@ class MANAGER {
         next_id   = 1;
         last_inactive_count = 0;
         bug_count = 0;
+        pulse     = 0;
         return init_ext();
     }
 
@@ -210,7 +211,7 @@ class MANAGER {
             log("%lu inactive instance%s.", iisz, iisz == 1 ? "" : "s");
             last_inactive_count = iisz;
         }
-        
+        pulse++;
         step_ext();
         return;
     }
@@ -353,6 +354,8 @@ class MANAGER {
         va_end(args);
     }
 
+    size_t get_pulse() const {return pulse;}
+
     inline void broadcast (const char *text) {
         // Send to client users and ignore server users.
         std::set<int> users;
@@ -398,5 +401,6 @@ class MANAGER {
     int next_id;
     size_t last_inactive_count;
     size_t bug_count;
+    size_t pulse;
 };
 
