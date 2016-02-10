@@ -5,6 +5,7 @@
 #include "manager.h"
 #include "user.h"
 #include "fun.h"
+#include "sockets.h"
 
 void USER::step(MANAGER *manager, int id, VARSET *vs) {
     INSTANCE *ins = manager->instance_find(id);
@@ -305,7 +306,10 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
 
     VARSET user_vs;
     manager->get_vs(id, &user_vs);
+    const char *host = user_vs.gets("host");
+    const char *port = user_vs.gets("port");
     int shell_id = user_vs.geti("shell_id");
+    int new_descriptor = 0;
 
     if (manager->instance_exists(shell_id)) {
         manager->set(id, "shell_id", 0);
@@ -313,12 +317,57 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
         VARSET shell_vs;
         manager->get_vs(shell_id, &shell_vs);
         if (shell_vs.geti("user_id") == id) {
-            manager->instance_destroy(shell_id);
+            // This user represents a conneciton to the remote host.
+            // Check if this connection has any clients. If it has clients,
+            // reconnect immediately.
+            bool destroy_shell = true;
+            VARSET find_vs;
+            find_vs.set("shell_id", shell_id);
+            bool has_users = (manager->instance_find("user", &find_vs) > 0);
+            if (has_users) {
+                // Reconnect because this shell has users.
+                int d = sockets.connect(host, port);
+                if (d <= 0) log("Failed to connect to %s:%s.", host, port);
+                else {
+                    log("New connection %d to %s:%s.", d, host, port);
+
+                    int new_user_id = manager->instance_create("user");
+                    if (new_user_id) {
+                        manager->set(new_user_id, "host", host);
+                        manager->set(new_user_id, "port", port);
+                        manager->set(new_user_id, "descriptor", d);
+                        manager->instance_activate(new_user_id);
+                        INSTANCE *new_ins = manager->instance_find(new_user_id);
+                        if (new_ins && new_ins->user) {
+                            new_ins->user->disable_greet();
+                            if (new_ins->user->has_prompt()) new_ins->user->toggle_prompt();
+                            if (!new_ins->user->is_server()) new_ins->user->toggle_server();
+                        }
+                        log("Created user %d (descriptor %d).", new_user_id, d);
+                        
+                        manager->set(shell_id,     "user_id", new_user_id);
+                        manager->set(new_user_id, "shell_id", shell_id);
+                        log("Shell %d reconnected as user %d.", shell_id, new_user_id);
+                        new_descriptor = d;
+                        destroy_shell = false;
+                    }
+                    else {
+                        log("Unable to create a user (descriptor %d).", d);
+                        sockets.disconnect(d);
+                    }
+                }
+            }
+
+            if (destroy_shell) {
+                if (!manager->instance_destroy(shell_id)) manager->bug("Failed to destroy shell %d.", shell_id);
+                else log("Destroyed shell %d (%s:%s).", shell_id, host, port);
+            }
         }
     }
 
     int descriptor = ins->user->get_descriptor();
-    if (manager->descriptors.count(descriptor) > 0) {
+    if (manager->descriptors.count(descriptor) > 0
+    && (!new_descriptor || descriptor != new_descriptor)) {
         manager->descriptors[descriptor].erase(id);
         if (manager->descriptors[descriptor].empty()) {
             manager->descriptors.erase(descriptor);

@@ -329,6 +329,17 @@ class MANAGER {
         }
     }
 
+    void instance_find(const char *object_name, const VARSET *vs, std::set<int> *to) {
+        OBJECT *obj = object_find(object_name);
+        if (!obj) return;
+
+        for (auto a : obj->instances) {
+            INSTANCE *ins = instance_find(a);
+            if (!ins) continue;
+            if (ins->vs.contains(vs)) to->insert(a);
+        }
+    }
+
     void (*log)(const char *p_fmt, ...) = drop_log;
     void bug(const char *format, ...) {
         char buffer[1024];
@@ -343,8 +354,21 @@ class MANAGER {
     }
 
     inline void broadcast (const char *text) {
-        for (auto a : obuf) {
-            write_to_buffer(&(obuf[a.first]), text);
+        // Send to client users and ignore server users.
+        std::set<int> users;
+        instance_find("user", &users);
+        for (int user_id : users) {
+            INSTANCE *ins_user = instance_find(user_id);
+            if (!ins_user) continue;
+            int shell_id = ins_user->vs.geti("shell_id");
+            INSTANCE *ins_shell = instance_find(shell_id);
+            if (ins_shell && ins_shell->vs.geti("user_id") == user_id) continue;
+            if (ins_user->user == nullptr) continue;
+
+            int descriptor = ins_user->vs.geti("descriptor");
+            if (obuf.count(descriptor) > 0) {
+                write_to_buffer(&(obuf[descriptor]), text);
+            }
         }
     }
 

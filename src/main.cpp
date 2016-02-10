@@ -139,7 +139,10 @@ bool wait(bool first) {
         log("Connection %d lost.", del);
         vs.set("descriptor", del);
 
-        while ( (user_id = manager.instance_find("user", &vs)) > 0 ) {
+        std::set<int> attached_users;
+        manager.instance_find("user", &vs, &attached_users);
+
+        for (int user_id : attached_users) {
             if (manager.instance_destroy(user_id)) log("Destroyed user %d (descriptor %d).", user_id, del);
             else {
                 log("Unable to destroy user %d (descriptor %d).", user_id, del);
