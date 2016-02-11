@@ -20,6 +20,7 @@ bool terminate   = false;
 
 size_t next_step_time = 1000000 / PULSE_PER_SECOND;
 double cpu_usage = 0.0;
+std::chrono::time_point<std::chrono::steady_clock> startup_time;
 
 int main(int argc, char **argv) {
     if (!init(argc, argv)) {
@@ -42,6 +43,7 @@ int main(int argc, char **argv) {
 
     log("\x1B[1;32mMultiPlay is ready to rock on %sport %s!\x1B[0m\x1B]0;MultiPlay\a", options.ipv6 ? "IPv6 " : "", options.port.c_str());
 
+    startup_time = std::chrono::steady_clock::now();
     setitimer(ITIMER_REAL, &timer, nullptr); // Needed to trigger the first SIGALRM for the main loop to activate.
     while (step());
 
@@ -204,6 +206,18 @@ bool step() {
         log("Warning, step finished sooner than expected (%lu / %lu).", step_time, next_step_time);
     }
     else time_debt = step_time - next_step_time;
+
+    size_t process_age = std::chrono::duration_cast<std::chrono::milliseconds>(t2-startup_time).count();
+    size_t expected_pulse = process_age / (1000/PPS);
+    size_t pulse = manager.get_pulse();
+    if (expected_pulse > pulse) {
+        log("Main loop is %lu pulses behind schedule.", expected_pulse - pulse);
+        time_debt += (expected_pulse - pulse) * (1000000/PPS);
+    }
+    if (expected_pulse < pulse) {
+        log("Main loop is %lu pulses ahead schedule.", pulse - expected_pulse);
+        time_give += (pulse - expected_pulse) * (1000000/PPS);
+    }
 
     next_step_time = 1000000/PPS + time_give;
     if (time_debt < next_step_time) next_step_time -= time_debt;
