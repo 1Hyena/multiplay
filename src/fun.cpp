@@ -26,7 +26,7 @@ static void do_(USER *u, const char *arg) {} // Do nothing.
 static void do_alarm(USER *u, const char *arg) {
     char pulse[8];
     arg = first_arg(arg, pulse, sizeof(pulse));
-    
+
     int pulse_int;
     if (!str2int(&pulse_int, pulse, 10) || pulse_int < 0) {
         u->sendf("Alarm length '%s' is neither a positive integer nor zero.\n\r", pulse);
@@ -64,7 +64,7 @@ static void do_connect(USER *u, const char *arg) {
         u->sendf("Port number '%s' is not a positive integer.\n\r", port);
         return;
     }
-    
+
     if (port_int > 65535) {
         u->sendf("Port number '%s' exceeds 65535.\n\r", port);
         return;
@@ -194,7 +194,7 @@ static void do_list(USER *u, const char *arg) {
     char comment[30];
 
     u->send("List of shells you could switch into:\n\r");
-    
+
     MANAGER *m = u->manager;
     std::set<int> shells;
     m->instance_find("shell", &shells);
@@ -210,12 +210,12 @@ static void do_list(USER *u, const char *arg) {
             u->send(" o------o--------------------------------o------o-----------------------------o\n\r");
             first = false;
         }
-        
+
         std::snprintf(id,      sizeof(id),      "%6d",   a);
         std::snprintf(host,    sizeof(host),    "%-32s", vs.gets("host"));
         std::snprintf(port,    sizeof(port),    "%6s",   vs.gets("port"));
         std::snprintf(comment, sizeof(comment), "%29s",  vs.gets("comment"));
-       
+
         u->sendf(" |%s|%s|%s|%s|\n\r", id, host, port, comment);
         count++;
     }
@@ -240,7 +240,7 @@ static void do_login(USER *u, const char *arg) {
 
     u->add_role(ROLE_AUTH);
     u->send("You are now authenticated.\n\r");
-    
+
     std::string tag;
     u->fetch_tag(&tag);
     log("%s has logged in.", tag.c_str());
@@ -329,4 +329,3 @@ const struct fun_type fun_table[] = {
     { "switch",     "Switch into another shell.",                          do_switch,     ROLE_AUTH, false },
     { nullptr,      nullptr,                                               nullptr,       0,         false }
 };
-
