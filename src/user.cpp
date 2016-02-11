@@ -81,7 +81,7 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     if (u->paralyzed) manager->paralyzed.insert(desc);    
 
     //log("%d:%d: %lu %lu", id, descriptor, ibuf.size(), obuf.size());
-    if (u->greet_countdown == 0) {
+    if (u->greet_countdown-- == 0) {
         char buf[4096];
         const char *message =
         "\x1B]0;MultiPlay Client\a\n\r"
@@ -94,8 +94,7 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
         else u->send("Cannot display the greeting screen (buffer not big enough).\n\r");
 
         u->send("Type \x1B[1;32mhelp\x1B[0m to see the available commands.\n\r");
-        u->greet_countdown = -1;
-    } else u->greet_countdown--;
+    }
 }
 
 bool USER::process_input() {

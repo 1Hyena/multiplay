@@ -38,6 +38,10 @@ static void do_alarm(USER *u, const char *arg) {
         u->sendf("Alarm shift '%s' is not an integer.\n\r", arg);
         return;
     }
+    else if (pulse_int > 0) {
+        // Adjust the shift so that the alarm would go off immediately.
+        shift_int = u->manager->get_pulse() % pulse_int + 1;
+    }
 
     u->manager->set(u->get_id(), "alarm_pulse", pulse_int);
     u->manager->set(u->get_id(), "alarm_shift", shift_int);
