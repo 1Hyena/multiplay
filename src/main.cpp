@@ -209,14 +209,14 @@ bool step() {
     else time_debt = step_time - next_step_time;
 
     size_t process_age = std::chrono::duration_cast<std::chrono::milliseconds>(t2-startup_time).count();
-    size_t expected_pulse = process_age / (1000/PPS);
-    size_t pulse = manager.get_pulse();
+    double expected_pulse = process_age / (1000.0/PPS);
+    double pulse = manager.get_pulse();
     if (expected_pulse > pulse) {
-        log("Main loop is %lu pulses behind schedule.", expected_pulse - pulse);
+        if (expected_pulse - pulse >= 1.0) log("Main loop is falling behind schedule.");
         time_debt += (expected_pulse - pulse) * (1000000/PPS);
     }
     if (expected_pulse < pulse) {
-        log("Main loop is %lu pulses ahead schedule.", pulse - expected_pulse);
+        if (pulse - expected_pulse >= 1.0) log("Main loop is getting ahead schedule.");
         time_give += (pulse - expected_pulse) * (1000000/PPS);
     }
 

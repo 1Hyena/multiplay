@@ -25,22 +25,27 @@ static void do_(USER *u, const char *arg) {} // Do nothing.
 
 static void do_alarm(USER *u, const char *arg) {
     char pulse[8];
-    arg = first_arg(arg, pulse, sizeof(pulse));
-
-    int pulse_int;
-    if (!str2int(&pulse_int, pulse, 10) || pulse_int < 0) {
-        u->sendf("Alarm length '%s' is neither a positive integer nor zero.\n\r", pulse);
-        return;
-    }
-
+    int pulse_int = 0;
     int shift_int = 0;
-    if (strlen(arg) > 0 && !str2int(&shift_int, arg, 10)) {
-        u->sendf("Alarm shift '%s' is not an integer.\n\r", arg);
-        return;
-    }
-    else if (pulse_int > 0) {
-        // Adjust the shift so that the alarm would go off immediately.
-        shift_int = u->manager->get_pulse() % pulse_int + 1;
+    
+    if (strlen(arg) > 0) {
+        arg = first_arg(arg, pulse, sizeof(pulse));
+
+        if (!str2int(&pulse_int, pulse, 10) || pulse_int < 0) {
+            u->sendf("Alarm length '%s' is neither a positive integer nor zero.\n\r", pulse);
+            return;
+        }
+
+        if (strlen(arg) > 0) {
+            if (!str2int(&shift_int, arg, 10)) {
+                u->sendf("Alarm shift '%s' is not an integer.\n\r", arg);
+                return;
+            }
+        }
+        else if (pulse_int > 0) {
+            // Adjust the shift so that the alarm would go off immediately.
+            shift_int = u->manager->get_pulse() % pulse_int + 1;
+        }
     }
 
     u->manager->set(u->get_id(), "alarm_pulse", pulse_int);
