@@ -322,12 +322,25 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
     INSTANCE *ins = manager->instance_find(id);
     if (!ins || !ins->user) return;
 
+    // First make sure the manager containers get updated properly because if
+    // in the end we create new connections, those new descriptors might be the
+    // same as the user's current descriptor.
+    int descriptor = ins->user->get_descriptor();
+    if (manager->descriptors.count(descriptor) > 0) {
+        manager->descriptors[descriptor].erase(id);
+        if (manager->descriptors[descriptor].empty()) {
+            manager->descriptors.erase(descriptor);
+            manager->obuf.erase(descriptor);
+            manager->ibuf.erase(descriptor);
+            manager->paralyzed.erase(descriptor);
+        }
+    }
+
     VARSET user_vs;
     manager->get_vs(id, &user_vs);
     const char *host = user_vs.gets("host");
     const char *port = user_vs.gets("port");
     int shell_id = user_vs.geti("shell_id");
-    int new_descriptor = 0;
 
     if (manager->instance_exists(shell_id)) {
         manager->set(id, "shell_id", 0);
@@ -366,7 +379,6 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
                         manager->set(shell_id,     "user_id", new_user_id);
                         manager->set(new_user_id, "shell_id", shell_id);
                         log("Shell %d reconnected as user %d.", shell_id, new_user_id);
-                        new_descriptor = d;
                         destroy_shell = false;
                     }
                     else {
@@ -380,18 +392,6 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
                 if (!manager->instance_destroy(shell_id)) manager->bug("Failed to destroy shell %d.", shell_id);
                 else log("Destroyed shell %d (%s:%s).", shell_id, host, port);
             }
-        }
-    }
-
-    int descriptor = ins->user->get_descriptor();
-    if (manager->descriptors.count(descriptor) > 0
-    && (!new_descriptor || descriptor != new_descriptor)) {
-        manager->descriptors[descriptor].erase(id);
-        if (manager->descriptors[descriptor].empty()) {
-            manager->descriptors.erase(descriptor);
-            manager->obuf.erase(descriptor);
-            manager->ibuf.erase(descriptor);
-            manager->paralyzed.erase(descriptor);
         }
     }
 

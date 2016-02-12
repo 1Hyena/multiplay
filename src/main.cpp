@@ -153,9 +153,10 @@ bool wait(bool first, size_t max_usec) {
         manager.instance_find("user", &vs, &attached_users);
 
         for (int user_id : attached_users) {
-            if (manager.instance_destroy(user_id)) log("Destroyed user %d (descriptor %d).", user_id, del);
+            log("Destroying user %d (descriptor %d).", user_id, del);
+            if (manager.instance_destroy(user_id)) log("Destroyed user %d.", user_id);
             else {
-                log("Unable to destroy user %d (descriptor %d).", user_id, del);
+                log("Unable to destroy user %d.", user_id);
                 break;
             }
         }
