@@ -26,9 +26,11 @@ static void do_(USER *u, const char *arg) {} // Do nothing.
 static void do_connect(USER *u, const char *arg) {
     char host[256];
     char port[8];
+    char pass[32];
     char comment[256];
     arg = first_arg(arg, host, sizeof(host));
     arg = first_arg(arg, port, sizeof(port));
+    arg = first_arg(arg, pass, sizeof(pass));
     std::snprintf(comment, sizeof(comment), "%s", arg);
 
     int port_int;
@@ -74,10 +76,11 @@ static void do_connect(USER *u, const char *arg) {
     }
 
     int shell = m->instance_create("shell");
-    m->set(shell, "host",    host);
-    m->set(shell, "port",    port);
-    m->set(shell, "comment", comment);
-    m->set(shell, "user_id", new_user_id);
+    m->set(shell, "host",     host);
+    m->set(shell, "port",     port);
+    m->set(shell, "password", pass);
+    m->set(shell, "comment",  comment);
+    m->set(shell, "user_id",  new_user_id);
 
     if (!m->instance_activate(shell)) {
         u->send("Failed to create a new shell.\n\r");
@@ -87,7 +90,8 @@ static void do_connect(USER *u, const char *arg) {
 
     m->set(new_user_id, "shell_id", shell);
     log("Created shell %d (%s:%s).", shell, host, port);
-    u->sendf("Established a new connection to %s:%s as shell %d.\n\r", host, port, shell);
+    u->sendf("Established a new %s connection to %s:%s as shell %d.\n\r", pass[0] ? "private" : "public", host, port, shell);
+    if (pass[0]) u->sendf("You can only switch into this private shell by typing 'switch %s'.\n\r", pass);
 }
 
 static void do_disconnect(USER *u, const char *arg) {
@@ -175,6 +179,7 @@ static void do_list(USER *u, const char *arg) {
     for (auto a : shells) {
         VARSET vs;
         m->get_vs(a, &vs);
+        if (vs.gets("password")[0] != '\0') continue;
 
         if (first) {
             u->send(" o------o--------------------------------o------o-----------------------------o\n\r");
@@ -253,11 +258,22 @@ static void do_su(USER *u, const char *arg) {
 }
 
 static void do_switch(USER *u, const char *arg) {
-    int shell_id;
+    int shell_id = 0;
     int user_id = u->get_id();
-    if (!str2int(&shell_id, arg, 10) || shell_id <= 0) {
-        u->sendf("Argument '%s' is not a positive integer.\n\r", arg);
-        return;
+    bool authenticated = false;
+
+    if (strlen(arg) > 0) {
+        VARSET find_vs;
+        find_vs.set("password", arg);
+        shell_id = u->manager->instance_find("shell", &find_vs);
+        if (shell_id) authenticated = true;
+    }
+
+    if (!shell_id) {
+        if (!str2int(&shell_id, arg, 10) || shell_id <= 0) {
+            u->sendf("Argument '%s' is not a positive integer nor a valid shell password.\n\r", arg);
+            return;
+        }
     }
 
     if (!u->manager->instance_exists(shell_id)) {
@@ -272,6 +288,11 @@ static void do_switch(USER *u, const char *arg) {
 
     if (strcmp(shell_vs.gets("object_name"), "shell")) {
         u->send("Target cannot be switched into.\n\r");
+        return;
+    }
+
+    if (shell_vs.gets("password")[0] && !authenticated) {
+        u->sendf("Shell %d is password protected.\n\r", shell_id);
         return;
     }
 
