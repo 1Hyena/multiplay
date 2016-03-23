@@ -5,6 +5,7 @@
 #include "manager.h"
 #include "user.h"
 #include "fun.h"
+#include "sockets.h"
 
 void USER::step(MANAGER *manager, int id, VARSET *vs) {
     INSTANCE *ins = manager->instance_find(id);
@@ -15,6 +16,24 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     bool ignored = (manager->ignored.count(desc) > 0);
     manager->ignored.erase(desc);
 
+    int alarm_pulse = ins->vs.geti("alarm_pulse");
+    int alarm_shift = ins->vs.geti("alarm_shift");
+
+    size_t shift = 0;
+    if (alarm_pulse > 0) {
+        if (alarm_shift >= alarm_pulse) alarm_shift %= alarm_pulse;
+        else if (alarm_shift < 0) {
+            alarm_shift*= -1;
+            alarm_shift = ((alarm_shift-1) % alarm_pulse) + 1;
+            alarm_shift = alarm_pulse - alarm_shift;
+        }
+        shift = alarm_shift;
+    }
+
+    if (alarm_pulse > 0 && manager->get_pulse() % alarm_pulse == shift) {
+        u->sendf("MultiPlay :: Alarm on pulse %d went off with shift %d!\n\r", alarm_pulse, alarm_shift);
+    }
+
     // First copy the incoming bytes into the user's personal buffer.
     if (manager->ibuf.count(desc) > 0) {
         auto ibd = &manager->ibuf[desc];
@@ -23,22 +42,16 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     }
 
     // If the user is not frozen, process its input.
+    bool prepend_newline = false;
     if (!ignored) {
         size_t input_before = u->ibuf.size();
-        u->process_input();
+        bool command_executed = u->process_input();
         size_t input_after = u->ibuf.size();
+        prepend_newline = (input_after == input_before);
 
         // Finally bust a prompt if needed and clear the higher level output buffer.
         size_t osz = u->obuf.size();
-        if (osz > 0 || input_after != input_before) {
-            /*
-            if (input_after == input_before
-            &&  u->obuf.back() != '\r'
-            &&  u->obuf.back() != '\n') {
-                u->obuf.push_back('\n');
-                u->obuf.push_back('\r');
-            }
-            */
+        if (osz > 0 || command_executed) {
             u->send_prompt();
         }
     }
@@ -54,7 +67,13 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
                 log("User %d is frozen while receiving %lu byte%s.", u->id, ssz, ssz == 1 ? "" : "s");
             }
         }
-        obd->insert(std::end(*obd), std::begin(u->obuf), std::end(u->obuf));
+        if (u->obuf.size() > 0) {
+            if (prepend_newline && u->has_prompt()) {
+                obd->push_back('\n');
+                obd->push_back('\r');
+            }
+            obd->insert(std::end(*obd), std::begin(u->obuf), std::end(u->obuf));
+        }
     }
     u->obuf.clear();
     
@@ -62,7 +81,7 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
     if (u->paralyzed) manager->paralyzed.insert(desc);    
 
     //log("%d:%d: %lu %lu", id, descriptor, ibuf.size(), obuf.size());
-    if (u->greet_countdown == 0) {
+    if (u->greet_countdown-- == 0) {
         char buf[4096];
         const char *message =
         "\x1B]0;MultiPlay Client\a\n\r"
@@ -75,15 +94,14 @@ void USER::step(MANAGER *manager, int id, VARSET *vs) {
         else u->send("Cannot display the greeting screen (buffer not big enough).\n\r");
 
         u->send("Type \x1B[1;32mhelp\x1B[0m to see the available commands.\n\r");
-        u->greet_countdown = -1;
-    } else u->greet_countdown--;
+    }
 }
 
-void USER::process_input() {
+bool USER::process_input() {
     std::vector<unsigned char> *bytes = &ibuf;
     size_t sz = bytes->size();
 
-    if (sz == 0 || paralyzed) return;
+    if (sz == 0 || paralyzed) return false;
 
     if (server) {
         VARSET vs;
@@ -103,7 +121,7 @@ void USER::process_input() {
         }
         
         bytes->clear();
-        return;
+        return false;
     }
     
     //if (options.verbose) {
@@ -119,7 +137,7 @@ void USER::process_input() {
             write_to_buffer(&obuf, "Put a lid on it ! ! !\n\r");
             paralyzed = true;
         }
-        return;
+        return false;
     }
 
     sz = bytes->size();
@@ -159,7 +177,7 @@ void USER::process_input() {
                         ins->user->sendf("%s: %s\n\r", tag.c_str(), line.c_str());
                     }                    
                 }
-                return;
+                return false;
             }
         }
     }
@@ -187,7 +205,8 @@ void USER::process_input() {
         interpret(command_name, args);
         greet_countdown = -1;
     }
-    else send("Command line too long!\n\r");    
+    else send("Command line too long!\n\r");
+    return true;
 }
 
 bool USER::interpret(const char* command, const char* arg) {
@@ -303,20 +322,9 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
     INSTANCE *ins = manager->instance_find(id);
     if (!ins || !ins->user) return;
 
-    VARSET user_vs;
-    manager->get_vs(id, &user_vs);
-    int shell_id = user_vs.geti("shell_id");
-
-    if (manager->instance_exists(shell_id)) {
-        manager->set(id, "shell_id", 0);
-
-        VARSET shell_vs;
-        manager->get_vs(shell_id, &shell_vs);
-        if (shell_vs.geti("user_id") == id) {
-            manager->instance_destroy(shell_id);
-        }
-    }
-
+    // First make sure the manager containers get updated properly because if
+    // in the end we create new connections, those new descriptors might be the
+    // same as the user's current descriptor.
     int descriptor = ins->user->get_descriptor();
     if (manager->descriptors.count(descriptor) > 0) {
         manager->descriptors[descriptor].erase(id);
@@ -325,6 +333,65 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
             manager->obuf.erase(descriptor);
             manager->ibuf.erase(descriptor);
             manager->paralyzed.erase(descriptor);
+        }
+    }
+
+    VARSET user_vs;
+    manager->get_vs(id, &user_vs);
+    const char *host = user_vs.gets("host");
+    const char *port = user_vs.gets("port");
+    int shell_id = user_vs.geti("shell_id");
+
+    if (manager->instance_exists(shell_id)) {
+        manager->set(id, "shell_id", 0);
+
+        VARSET shell_vs;
+        manager->get_vs(shell_id, &shell_vs);
+        if (shell_vs.geti("user_id") == id) {
+            // This user represents a conneciton to the remote host.
+            // Check if this connection has any clients. If it has clients,
+            // reconnect immediately.
+            bool destroy_shell = true;
+            VARSET find_vs;
+            find_vs.set("shell_id", shell_id);
+            bool has_users = (manager->instance_find("user", &find_vs) > 0);
+            if (has_users) {
+                // Reconnect because this shell has users.
+                int d = sockets.connect(host, port);
+                if (d <= 0) log("Failed to connect to %s:%s.", host, port);
+                else {
+                    log("New connection %d to %s:%s.", d, host, port);
+
+                    int new_user_id = manager->instance_create("user");
+                    if (new_user_id) {
+                        manager->set(new_user_id, "host", host);
+                        manager->set(new_user_id, "port", port);
+                        manager->set(new_user_id, "descriptor", d);
+                        manager->instance_activate(new_user_id);
+                        INSTANCE *new_ins = manager->instance_find(new_user_id);
+                        if (new_ins && new_ins->user) {
+                            new_ins->user->disable_greet();
+                            if (new_ins->user->has_prompt()) new_ins->user->toggle_prompt();
+                            if (!new_ins->user->is_server()) new_ins->user->toggle_server();
+                        }
+                        log("Created user %d (descriptor %d).", new_user_id, d);
+                        
+                        manager->set(shell_id,     "user_id", new_user_id);
+                        manager->set(new_user_id, "shell_id", shell_id);
+                        log("Shell %d reconnected as user %d.", shell_id, new_user_id);
+                        destroy_shell = false;
+                    }
+                    else {
+                        log("Unable to create a user (descriptor %d).", d);
+                        sockets.disconnect(d);
+                    }
+                }
+            }
+
+            if (destroy_shell) {
+                if (!manager->instance_destroy(shell_id)) manager->bug("Failed to destroy shell %d.", shell_id);
+                else log("Destroyed shell %d (%s:%s).", shell_id, host, port);
+            }
         }
     }
 

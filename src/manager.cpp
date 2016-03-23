@@ -10,7 +10,9 @@ bool MANAGER::init_ext() {
         obj->add_event("create",  USER::create );
         obj->add_event("destroy", USER::destroy);
         obj->add_event("step",    USER::step   );
-        obj->vs.set("shell_id", 0);
+        obj->vs.set("shell_id",    0);
+        obj->vs.set("alarm_pulse", 0);
+        obj->vs.set("alarm_shift", 0);
     } else return false;
     
     if ( (obj = object_add("shell")) ) {

@@ -33,7 +33,7 @@ class USER {
     void send(const char *text);
     void sendf(const char *p_fmt, ...);
     void send_bytes(const unsigned char *bytes, size_t count);
-    void process_input();
+    bool process_input();
 
     class MANAGER *manager;
 

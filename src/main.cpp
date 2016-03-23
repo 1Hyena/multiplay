@@ -15,9 +15,12 @@ SOCKETS sockets;
 MANAGER manager;
 
 struct itimerval timer;
-struct itimerval laggy;
 int tcp_listener = -1; // Descriptor for accepting and serving new connections.
 bool terminate   = false;
+
+size_t next_step_time = 1000000 / PULSE_PER_SECOND;
+double cpu_usage = 0.0;
+std::chrono::time_point<std::chrono::steady_clock> startup_time;
 
 int main(int argc, char **argv) {
     if (!init(argc, argv)) {
@@ -40,10 +43,18 @@ int main(int argc, char **argv) {
 
     log("\x1B[1;32mMultiPlay is ready to rock on %sport %s!\x1B[0m\x1B]0;MultiPlay\a", options.ipv6 ? "IPv6 " : "", options.port.c_str());
 
-    alarm(1); // Needed to trigger the first SIGALRM for the main loop to activate.
+    startup_time = std::chrono::steady_clock::now();
+    setitimer(ITIMER_REAL, &timer, nullptr); // Needed to trigger the first SIGALRM for the main loop to activate.
     while (step());
 
     return deinit();
+}
+
+void init_timer(struct itimerval *t, size_t usec) {
+    t->it_value.tv_sec     = usec / 1000000;
+    t->it_value.tv_usec    = usec % 1000000;
+    t->it_interval.tv_sec  = 0;
+    t->it_interval.tv_usec = 0;
 }
 
 bool init(int argc, char **argv) {
@@ -52,15 +63,7 @@ bool init(int argc, char **argv) {
     ||  !sockets.init(            &log_sockets)
     ||  !manager.init(            &log_manager)) return false;
 
-    timer.it_value.tv_sec     = (PULSE_PER_SECOND == 1 ? 1 : 0);
-    timer.it_value.tv_usec    = (PULSE_PER_SECOND == 1 ? 0 : 1000000 / PULSE_PER_SECOND);
-    timer.it_interval.tv_sec  = 0;
-    timer.it_interval.tv_usec = 0;
-
-    laggy.it_value.tv_sec     = 0;
-    laggy.it_value.tv_usec    = 10000;
-    laggy.it_interval.tv_sec  = 0;
-    laggy.it_interval.tv_usec = 0;
+    init_timer(&timer, next_step_time);
 
     return true;
 }
@@ -76,7 +79,7 @@ int deinit() {
     return result;
 }
 
-bool wait(bool first) {
+bool wait(bool first, size_t max_usec) {
     bool alarmed = false;
     int user_id;
 
@@ -89,9 +92,16 @@ bool wait(bool first) {
         switch (sig) {
             case SIGALRM:
                         {
-                            setitimer(ITIMER_REAL, first ? &laggy : &timer, NULL);
                             alarmed = true; 
-                            if (first) log("Warning! Process is lagging.");
+                            if (first && next_step_time > 1) {
+                                // We ignore this block if next_step_time is equal to 1 because
+                                // we do not wish to spam this line more than once in a row.
+                                log("Warning! Process is lagging, CPU usage %2.1f%%.", cpu_usage);
+                            }
+                            if (!max_usec || first) max_usec = 1;
+
+                            init_timer(&timer, max_usec);
+                            setitimer(ITIMER_REAL, &timer, nullptr);                            
                             break;
                         }
             case SIGINT :
@@ -139,10 +149,14 @@ bool wait(bool first) {
         log("Connection %d lost.", del);
         vs.set("descriptor", del);
 
-        while ( (user_id = manager.instance_find("user", &vs)) > 0 ) {
-            if (manager.instance_destroy(user_id)) log("Destroyed user %d (descriptor %d).", user_id, del);
+        std::set<int> attached_users;
+        manager.instance_find("user", &vs, &attached_users);
+
+        for (int user_id : attached_users) {
+            log("Destroying user %d (descriptor %d).", user_id, del);
+            if (manager.instance_destroy(user_id)) log("Destroyed user %d.", user_id);
             else {
-                log("Unable to destroy user %d (descriptor %d).", user_id, del);
+                log("Unable to destroy user %d.", user_id);
                 break;
             }
         }
@@ -153,7 +167,6 @@ bool wait(bool first) {
 
 bool step() {
     std::chrono::duration<double> dt;
-    std::chrono::milliseconds ms;
     std::chrono::time_point<std::chrono::steady_clock> t2, t1 = std::chrono::steady_clock::now();
     // Disconnect paralyzed users.
     for (auto d : manager.paralyzed) sockets.disconnect(d);
@@ -161,15 +174,61 @@ bool step() {
     // Perform the main update cycle.
     manager.step();
 
+    t2 = std::chrono::steady_clock::now();
+    size_t time_left, step_time = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+    size_t time_debt = 0;
+    size_t time_give = 0;
+    cpu_usage = 100.0*step_time/next_step_time;
+
     // Wait until the time budget is spent.
     bool first = true;
-    do {
-        t2 = std::chrono::steady_clock::now();
-        dt = t2-t1;
-        ms = std::chrono::duration_cast<std::chrono::milliseconds>(dt);
-        if (!wait(first)) break;
+    while (1) {
+        time_left = next_step_time - std::min(step_time, next_step_time);
+        if (!wait(first, time_left)) {
+            // We got SIGALRM during last call to wait and it was not the first call.
+            t2 = std::chrono::steady_clock::now();
+            step_time = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+            time_give = next_step_time - std::min(step_time, next_step_time);
+            if (time_give > 0) log("Sleeping for extra %lu microseconds.", time_give);
+            break;
+        }
         first = false;
-    } while (ms.count() < 1000/PULSE_PER_SECOND);
+
+        t2 = std::chrono::steady_clock::now();
+        step_time = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+
+        if (step_time >= next_step_time) break; // Time limit exceeded, this is normal.
+    }
+
+    t2 = std::chrono::steady_clock::now();
+    step_time = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+    if (step_time < next_step_time) {
+        if (step_time + time_give < next_step_time)
+        log("Warning, step finished sooner than expected (%lu / %lu).", step_time, next_step_time);
+    }
+    else time_debt = step_time - next_step_time;
+
+    size_t process_age = std::chrono::duration_cast<std::chrono::milliseconds>(t2-startup_time).count();
+    double expected_pulse = process_age / (1000.0/PPS);
+    double pulse = manager.get_pulse();
+    if (expected_pulse > pulse) {
+        if (expected_pulse - pulse >= 1.0) log("Main loop is falling behind schedule.");
+        time_debt += (expected_pulse - pulse) * (1000000/PPS);
+    }
+    if (expected_pulse < pulse) {
+        if (pulse - expected_pulse >= 1.0) log("Main loop is getting ahead schedule.");
+        time_give += (pulse - expected_pulse) * (1000000/PPS);
+    }
+
+    next_step_time = 1000000/PPS + time_give;
+    if (time_debt < next_step_time) next_step_time -= time_debt;
+    else                            next_step_time = 1;
+
+    signals.block();
+    init_timer(&timer, next_step_time);
+    setitimer(ITIMER_REAL, &timer, nullptr);
+    signals.sig_alarm = 0;
+    signals.unblock(); 
 
     return !terminate;
 }
