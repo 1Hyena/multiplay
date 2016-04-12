@@ -216,7 +216,8 @@ static void do_list(USER *u, const char *arg) {
     for (auto a : shells) {
         VARSET vs;
         m->get_vs(a, &vs);
-        if (vs.gets("password")[0] != '\0') continue;
+        bool pass = (vs.gets("password")[0] != '\0');
+        if (pass && !u->has_role(ROLE_SU)) continue;
 
         if (first) {
             u->send(" o------o--------------------------------o------o-----------------------------o\n\r");
@@ -225,10 +226,11 @@ static void do_list(USER *u, const char *arg) {
             first = false;
         }
 
-        std::snprintf(id,      sizeof(id),      "%6d",   a);
-        std::snprintf(host,    sizeof(host),    "%-32s", vs.gets("host"));
-        std::snprintf(port,    sizeof(port),    "%6s",   vs.gets("port"));
-        std::snprintf(comment, sizeof(comment), "%29s",  vs.gets("comment"));
+        std::snprintf(id,   sizeof(id),   "%6d",   a);
+        std::snprintf(host, sizeof(host), "%-32s", vs.gets("host"));
+        std::snprintf(port, sizeof(port), "%6s",   vs.gets("port"));
+        if (pass) std::snprintf(comment, sizeof(comment), "%-19s (PRIVATE)",  vs.gets("comment"));
+        else      std::snprintf(comment, sizeof(comment), "%-29s",            vs.gets("comment"));
 
         u->sendf(" |%s|%s|%s|%s|\n\r", id, host, port, comment);
         count++;
@@ -328,7 +330,7 @@ static void do_switch(USER *u, const char *arg) {
         return;
     }
 
-    if (shell_vs.gets("password")[0] && !authenticated) {
+    if (shell_vs.gets("password")[0] && !authenticated && !u->has_role(ROLE_SU)) {
         u->sendf("Shell %d is password protected.\n\r", shell_id);
         return;
     }
