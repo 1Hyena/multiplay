@@ -19,9 +19,10 @@ bool MANAGER::init_ext() {
         obj->add_event("create",  SHELL::create );
         obj->add_event("destroy", SHELL::destroy);
         obj->add_event("step",    SHELL::step   );
-        obj->vs.set("host",       "");
-        obj->vs.set("port",       "");
-        obj->vs.set("comment",    "");
+        obj->vs.set("host",          "");
+        obj->vs.set("port",          "");
+        obj->vs.set("comment",       "");
+        obj->vs.set("persistent", false);
     } else return false;
 
     return true;

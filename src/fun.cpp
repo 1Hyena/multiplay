@@ -113,11 +113,12 @@ static void do_connect(USER *u, const char *arg) {
     }
 
     int shell = m->instance_create("shell");
-    m->set(shell, "host",     host);
-    m->set(shell, "port",     port);
-    m->set(shell, "password", pass);
-    m->set(shell, "comment",  comment);
-    m->set(shell, "user_id",  new_user_id);
+    m->set(shell, "host",       host);
+    m->set(shell, "port",       port);
+    m->set(shell, "password",   pass);
+    m->set(shell, "comment",    comment);
+    m->set(shell, "user_id",    new_user_id);
+    m->set(shell, "persistent", true);
 
     if (!m->instance_activate(shell)) {
         u->send("Failed to create a new shell.\n\r");
@@ -229,8 +230,12 @@ static void do_list(USER *u, const char *arg) {
         std::snprintf(id,   sizeof(id),   "%6d",   a);
         std::snprintf(host, sizeof(host), "%-32s", vs.gets("host"));
         std::snprintf(port, sizeof(port), "%6s",   vs.gets("port"));
-        if (pass) std::snprintf(comment, sizeof(comment), "%-19s (PRIVATE)",  vs.gets("comment"));
-        else      std::snprintf(comment, sizeof(comment), "%-29s",            vs.gets("comment"));
+        if (pass) {
+            std::string combuf = vs.gets("comment");
+            combuf.resize(19);
+            std::snprintf(comment, sizeof(comment), "%-19s (PRIVATE)", combuf.c_str());
+        }
+        else std::snprintf(comment, sizeof(comment), "%-29s", vs.gets("comment"));
 
         u->sendf(" |%s|%s|%s|%s|\n\r", id, host, port, comment);
         count++;
@@ -266,6 +271,47 @@ static void do_prompt(USER *u, const char *arg) {
     u->toggle_prompt();
     if (u->has_prompt()) u->send("Prompt is now enabled.\n\r");
     else                 u->send("Prompt is now disabled.\n\r");
+}
+
+static void do_provide(USER *u, const char *arg) {
+    char pass[32];
+    char comment[256];
+    MANAGER *m = u->manager;
+
+    int user_id = u->get_id();
+    VARSET user_vs;
+    u->manager->get_vs(user_id,  &user_vs);
+
+    if (u->manager->instance_exists(user_vs.geti("shell_id"))) {
+        u->send("You cannot provide a shell while being switched into another shell.\n\r");
+        return;
+    }
+
+    arg = first_arg(arg, pass, sizeof(pass));
+    std::snprintf(comment, sizeof(comment), "%s", arg);
+
+    std::string host = u->get_host();
+    std::string port = u->get_port();
+
+    int shell = m->instance_create("shell");
+    m->set(shell, "host",       host.c_str());
+    m->set(shell, "port",       port.c_str());
+    m->set(shell, "password",   pass);
+    m->set(shell, "comment",    comment);
+    m->set(shell, "user_id",    user_id);
+    if (!m->instance_activate(shell)) {
+        u->send("Failed to create a new shell.\n\r");
+        return;
+    }
+
+    INSTANCE *ins = m->instance_find(user_id);
+    if (ins && ins->user) {
+        if (ins->user->has_prompt()) ins->user->toggle_prompt();
+        if (!ins->user->is_server()) ins->user->toggle_server();
+    }
+
+    m->set(user_id, "shell_id", shell);
+    log("User %d becomes a shell %d (%s:%s).", user_id, shell, host.c_str(), port.c_str());
 }
 
 static void do_return(USER *u, const char *arg) {
@@ -347,7 +393,7 @@ static void do_switch(USER *u, const char *arg) {
 
 const struct fun_type fun_table[] = {
     { "",           "Bust a prompt.",                                      do_,           ROLE_NONE, false },
-    { "alarm",      "Sets an alarm for the defined number of pulses.",     do_alarm,      ROLE_AUTH, false },
+    { "alarm",      "Set an alarm for the defined number of pulses.",      do_alarm,      ROLE_AUTH, false },
     { "connect",    "Connect a new shell to a remote host/port.",          do_connect,    ROLE_AUTH, true  },
     { "disconnect", "Disconnect a user or a shell by its ID.",             do_disconnect, ROLE_SU,   true  },
     { "exit",       "Close the connection.",                               do_exit,       ROLE_NONE, false },
@@ -356,6 +402,7 @@ const struct fun_type fun_table[] = {
     { "log",        "Log the text given as an argument.",                  do_log,        ROLE_SU,   false },
     { "login",      "Authenticate the current session.",                   do_login,      ROLE_NONE, false },
     { "prompt",     "Toggle the prompt that is shown after each command.", do_prompt,     ROLE_NONE, false },
+    { "provide",    "Provide your connection as a shell to others.",       do_provide,    ROLE_AUTH, false },
     { "return",     "Return from your current shell.",                     do_return,     ROLE_AUTH, false },
     { "su",         "Elevate the current user to the superuser.",          do_su,         ROLE_NONE, true  },
     { "switch",     "Switch into another shell.",                          do_switch,     ROLE_AUTH, false },

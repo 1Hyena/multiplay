@@ -355,7 +355,8 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
             VARSET find_vs;
             find_vs.set("shell_id", shell_id);
             bool has_users = (manager->instance_find("user", &find_vs) > 0);
-            if (has_users) {
+
+            if (has_users && shell_vs.getb("persistent")) {
                 // Reconnect because this shell has users.
                 int d = sockets.connect(host, port);
                 if (d <= 0) log("Failed to connect to %s:%s.", host, port);
