@@ -286,6 +286,14 @@ void USER::send_prompt() {
 
 void USER::fetch_tag(std::string *to) {
     char buf[256];
+
+    MANAGER *m = manager;
+    INSTANCE *ins = m->instance_find(id);
+    if (ins && ins->user && strlen(ins->vs.gets("name")) > 0) {
+        to->append(ins->vs.gets("name"));
+        return;
+    }
+
     sprintf(buf, "User %04d", id);
     to->append(buf);
 }
@@ -341,6 +349,8 @@ void USER::destroy(class MANAGER *manager, int id, VARSET *vs) {
     const char *host = user_vs.gets("host");
     const char *port = user_vs.gets("port");
     int shell_id = user_vs.geti("shell_id");
+
+    if (strlen(user_vs.gets("team")) > 0) do_team(ins->user, user_vs.gets("team")); // Leave the team.
 
     if (manager->instance_exists(shell_id)) {
         manager->set(id, "shell_id", 0);

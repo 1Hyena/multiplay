@@ -13,6 +13,8 @@ bool MANAGER::init_ext() {
         obj->vs.set("shell_id",    0);
         obj->vs.set("alarm_pulse", 0);
         obj->vs.set("alarm_shift", 0);
+        obj->vs.set("name",       "");
+        obj->vs.set("team",       "");
     } else return false;
     
     if ( (obj = object_add("shell")) ) {

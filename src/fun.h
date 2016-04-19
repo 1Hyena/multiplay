@@ -21,3 +21,5 @@ extern class SOCKETS sockets;
 
 bool is_logged(const char * command);
 
+void do_team(USER *u, const char *arg);
+

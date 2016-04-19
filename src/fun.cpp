@@ -31,13 +31,13 @@ static void do_alarm(USER *u, const char *arg) {
     if (strlen(arg) > 0) {
         arg = first_arg(arg, pulse, sizeof(pulse));
 
-        if (!str2int(&pulse_int, pulse, 10) || pulse_int < 0) {
+        if (!str2int(pulse, &pulse_int, 10) || pulse_int < 0) {
             u->sendf("Alarm length '%s' is neither a positive integer nor zero.\n\r", pulse);
             return;
         }
 
         if (strlen(arg) > 0) {
-            if (!str2int(&shift_int, arg, 10)) {
+            if (!str2int(arg, &shift_int, 10)) {
                 u->sendf("Alarm shift '%s' is not an integer.\n\r", arg);
                 return;
             }
@@ -60,6 +60,93 @@ static void do_alarm(USER *u, const char *arg) {
     else                u->sendf("Alarm set for every %d. pulse.\n\r", pulse_int);
 }
 
+static void do_chat(USER *u, const char *arg) {
+    size_t i;
+    MANAGER *m = u->manager;
+    INSTANCE *ins = m->instance_find(u->get_id());
+    if (!ins || !ins->user) return;
+
+    for (i=0; arg[i]; ++i) {
+        if (std::iscntrl(arg[i])) {
+            u->sendf("'%s' contains illegal characters.\n\r", arg);
+            return;
+        }
+    }
+
+    if (i == 0) {
+        u->send("Chat what?\n\r");
+        return;
+    }
+
+    if (strlen(ins->vs.gets("team")) == 0) {
+        u->send("You cannot chat unless you are in a team.\n\r");
+        return;
+    }
+
+    std::string name;
+    u->fetch_tag(&name);
+
+    VARSET find_vs;
+    find_vs.set("team", ins->vs.gets("team"));
+    std::set<int> members;
+    m->instance_find("user", (const VARSET *) &find_vs, &members);
+    for (auto member_id : members) {
+        INSTANCE *ins_member = m->instance_find(member_id);
+        ins_member->user->sendf("%s chats: '%s'.\n\r", name.c_str(), arg);
+    }
+}
+
+static void do_claim(USER *u, const char *arg) {
+    size_t i;
+    MANAGER *m = u->manager;
+    INSTANCE *ins = m->instance_find(u->get_id());
+    if (!ins || !ins->user) return;
+
+    for (i=0; arg[i]; ++i) {
+        if (!std::isalnum(arg[i])) {
+            u->sendf("'%s' contains illegal characters.\n\r", arg);
+            return;
+        }
+    }
+
+    if (i == 1) {
+        u->send("Name length must be at least two characters.\n\r");
+        return;
+    }
+
+    if (i > 16) {
+        u->send("Name length must not exceed 16 characters.\n\r");
+        return;
+    }
+
+    std::string old_name;
+    std::string new_name = capitalize(arg);
+    u->fetch_tag(&old_name);
+
+    if (!strcasecmp(old_name.c_str(), new_name.c_str())) {
+        u->sendf("You are already known as %s.\n\r", old_name.c_str());
+        return;
+    }
+
+    ins->vs.set("name", new_name.c_str());
+    new_name.clear();
+    u->fetch_tag(&new_name);
+    log("%s claims a new name and becomes %s.", old_name.c_str(), new_name.c_str());
+    u->sendf("You are now known as %s.\n\r", new_name.c_str());
+
+    if (strlen(ins->vs.gets("team")) > 0) {    
+        VARSET find_vs;
+        find_vs.set("team", ins->vs.gets("team"));
+        std::set<int> members;
+        m->instance_find("user", (const VARSET *) &find_vs, &members);
+        for (auto member_id : members) {
+            if (member_id == u->get_id()) continue;
+            INSTANCE *ins_member = m->instance_find(member_id);
+            ins_member->user->sendf("%s claims a new name and becomes %s.\n\r", old_name.c_str(), new_name.c_str());
+        }
+    }
+}
+
 static void do_connect(USER *u, const char *arg) {
     char host[256];
     char port[8];
@@ -71,7 +158,7 @@ static void do_connect(USER *u, const char *arg) {
     std::snprintf(comment, sizeof(comment), "%s", arg);
 
     int port_int;
-    if (!str2int(&port_int, port, 10) || port_int <= 0) {
+    if (!str2int(port, &port_int, 10) || port_int <= 0) {
         u->sendf("Port number '%s' is not a positive integer.\n\r", port);
         return;
     }
@@ -134,7 +221,7 @@ static void do_connect(USER *u, const char *arg) {
 
 static void do_disconnect(USER *u, const char *arg) {
     int id;
-    if (!str2int(&id, arg, 10) || id <= 0) {
+    if (!str2int(arg, &id, 10) || id <= 0) {
         u->sendf("Argument '%s' is not a positive integer.\n\r", arg);
         return;
     }
@@ -355,7 +442,7 @@ static void do_switch(USER *u, const char *arg) {
     }
 
     if (!shell_id) {
-        if (!str2int(&shell_id, arg, 10) || shell_id <= 0) {
+        if (!str2int(arg, &shell_id, 10) || shell_id <= 0) {
             u->sendf("Argument '%s' is not a positive integer nor a valid shell password.\n\r", arg);
             return;
         }
@@ -391,20 +478,94 @@ static void do_switch(USER *u, const char *arg) {
     if (u->has_prompt()) u->toggle_prompt();
 }
 
+void do_team(USER *u, const char *arg) {
+    size_t i;
+    MANAGER *m = u->manager;
+    INSTANCE *ins = m->instance_find(u->get_id());
+    if (!ins || !ins->user) return;
+
+    for (i=0; arg[i]; ++i) {
+        if (std::iscntrl(arg[i])) {
+            u->sendf("Team password contains illegal characters.\n\r", arg);
+            return;
+        }
+    }
+
+    if (i > 32) {
+        u->send("Team passwords's length must not exceed 32 characters.\n\r");
+        return;
+    }
+
+    std::string tag;
+    VARSET find_vs;
+    std::set<int> members;
+
+    if (i == 0) {
+        if (strlen(ins->vs.gets("team")) > 0) {
+            find_vs.set("team", ins->vs.gets("team"));
+            m->instance_find("user", (const VARSET *) &find_vs, &members);
+            u->sendf("There %s %lu member%s in your team:\n\r", members.size() == 1 ? "is" : "are", members.size(), members.size() == 1 ? "" : "s");
+
+            for (auto member_id : members) {
+                INSTANCE *ins_member = m->instance_find(member_id);
+                tag.clear();
+                ins_member->user->fetch_tag(&tag);
+                u->sendf(" - %-16s (%s:%s)\n\r", tag.c_str(), ins_member->user->get_host(), ins_member->user->get_port());
+            }
+
+            u->sendf("\n\rTeam password: %s\n\r", ins->vs.gets("team"));
+            u->send("To leave a team, execute this command with the team's password.\n\r");
+        }
+        else {
+            u->send("You are currently not part of any team.\n\r");
+            u->send("To create or join a team, execute this command with a password.\n\r");
+        }
+        return;
+    }
+
+    u->fetch_tag(&tag);
+    find_vs.set("team", arg);
+    m->instance_find("user", (const VARSET *) &find_vs, &members);
+
+    if (!strcmp(arg, ins->vs.gets("team"))) {
+        // Leaving a team.
+        ins->vs.set("team", "");
+        u->send("You leave your team.\n\r");
+        for (auto member_id : members) {
+            if (member_id == u->get_id()) continue;
+            INSTANCE *ins_member = m->instance_find(member_id);
+            ins_member->user->sendf("%s has left the team.\n\r", tag.c_str());
+        }        
+        return;
+    }
+
+    for (auto member_id : members) {
+        INSTANCE *ins_member = m->instance_find(member_id);
+        ins_member->user->sendf("%s has joined the team.\n\r", tag.c_str());
+    }
+
+    ins->vs.set("team", arg);
+    u->sendf("Your team password is now set to '%s'.\n\r", arg);
+}
+
 const struct fun_type fun_table[] = {
     { "",           "Bust a prompt.",                                      do_,           ROLE_NONE, false },
-    { "alarm",      "Set an alarm for the defined number of pulses.",      do_alarm,      ROLE_AUTH, false },
+    { "alarm",      "Set an alarm for the defined number of pulses.",      do_alarm,      ROLE_NONE, false },
+    { "chat",       "Send a message to your team.",                        do_chat,       ROLE_NONE, false },
+    { "claim",      "Claim a temporary username.",                         do_claim,      ROLE_NONE, false },
     { "connect",    "Connect a new shell to a remote host/port.",          do_connect,    ROLE_AUTH, true  },
     { "disconnect", "Disconnect a user or a shell by its ID.",             do_disconnect, ROLE_SU,   true  },
     { "exit",       "Close the connection.",                               do_exit,       ROLE_NONE, false },
     { "help",       "Display the list of available commands.",             do_help,       ROLE_NONE, false },
-    { "list",       "Lists all the shells you could switch into.",         do_list,       ROLE_AUTH, false },
+    { "list",       "Lists all the shells you could switch into.",         do_list,       ROLE_NONE, false },
     { "log",        "Log the text given as an argument.",                  do_log,        ROLE_SU,   false },
     { "login",      "Authenticate the current session.",                   do_login,      ROLE_NONE, false },
     { "prompt",     "Toggle the prompt that is shown after each command.", do_prompt,     ROLE_NONE, false },
-    { "provide",    "Provide your connection as a shell to others.",       do_provide,    ROLE_AUTH, false },
-    { "return",     "Return from your current shell.",                     do_return,     ROLE_AUTH, false },
-    { "su",         "Elevate the current user to the superuser.",          do_su,         ROLE_NONE, true  },
-    { "switch",     "Switch into another shell.",                          do_switch,     ROLE_AUTH, false },
+    { "provide",    "Provide your connection as a shell to others.",       do_provide,    ROLE_NONE, false },
+    { "return",     "Return from your current shell.",                     do_return,     ROLE_NONE, false },
+    { "su",         "Elevate the current user to the superuser.",          do_su,         ROLE_AUTH, true  },
+    { "switch",     "Switch into another shell.",                          do_switch,     ROLE_NONE, false },
+    { "team",       "Join a specified team by its password.",              do_team,       ROLE_NONE, false },
     { nullptr,      nullptr,                                               nullptr,       0,         false }
 };
+

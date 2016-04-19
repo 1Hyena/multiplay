@@ -8,9 +8,9 @@
 const char *first_arg(const char *argument, char *output, size_t len) {
     char *arg_first = output;
     char cEnd = ' ';
-    
+
     while (*argument == ' ') argument++;
-    
+
     if ( *argument == '\'' || *argument == '"'
       || *argument == '%'  || *argument == '('
       || *argument == '{' )
@@ -31,13 +31,13 @@ const char *first_arg(const char *argument, char *output, size_t len) {
             argument++;
             break;
         }
-        
+
         *arg_first = *argument;
         if (len > 0 && --len > 0) arg_first++;
         argument++;
     }
     *arg_first = '\0';
-    
+
     while ( *argument == ' ' ) argument++;
     return argument;
 }
@@ -152,11 +152,11 @@ void write_to_buffer(std::vector<unsigned char> *to, const char *text) {
     for (;*text;++text) to->push_back(*text);
 }
 
-inline double deg2rad (const double degree) { return (degree * M_PIl / 180.0); };
-inline double rad2deg (const double radian) { return (radian * 180.0 / M_PIl); };
+inline double deg2rad (const double degree) { return (degree * M_PIl / 180.0); }
+inline double rad2deg (const double radian) { return (radian * 180.0 / M_PIl); }
 
 void shift_coordinates(double *lat, double *lon, double angle, double meters) {
-    const double earth_diameter = 6371.0 * 2 * 1000;
+    const double earth_diameter = 6373.0 * 2.0 * 1000.0;
     double latitude  = *lat;
     double longitude = *lon;
 
@@ -173,7 +173,18 @@ void shift_coordinates(double *lat, double *lon, double angle, double meters) {
     return;
 }
 
-bool str2int(int *i, char const *s, int base = 0) {
+double coordinate_distance(double lat1d, double lon1d, double lat2d, double lon2d) {
+    const double earth_radius = 6373.0 * 1000.0;
+    double dlon = lon2d - lon1d;
+    double dlat = lat2d - lat1d;
+    double u = sin(deg2rad(dlat/2.0));
+    double v = sin(deg2rad(dlon/2.0));
+    double a = u*u + cos(deg2rad(lat1d)) * cos(deg2rad(lat2d)) * v*v;
+    double c = 2.0 * atan2( sqrt(a), sqrt(1.0-a) );
+    return earth_radius * c;
+}
+
+bool str2int(char const *s, int *i, int base = 0) {
     char *end;
     long  l;
     errno = 0;
@@ -191,3 +202,62 @@ bool str2int(int *i, char const *s, int base = 0) {
     return true;
 }
 
+void str2hex(const char *str, std::string *hex) {
+    char buf[8];
+    for (; *str; ++str) {
+        sprintf(buf, "%02x", *str);
+        hex->append(buf);
+    }
+}
+
+void bin2hex(const unsigned char *bytes, size_t len, std::string *hex) {
+    char buf[8];
+    for (size_t i=0; i<len; ++i) {
+        sprintf(buf, "%02x", bytes[i]);
+        hex->append(buf);
+    }
+}
+
+void hex2bin(const char *hex, std::vector<unsigned char> *bin) {
+    auto h2b = [](unsigned char c) -> char
+    {
+             if(c >= 48 && c <=  57) return c - 48;
+        else if(c >= 97 && c <= 102) return c - 97 + 10;
+        else if(c >= 65 && c <=  70) return c - 65 + 10;
+        return -1;
+    };
+
+    int len = strlen(hex);
+
+    for (int i = 0; i < len; i = i+2){
+	    unsigned char b1 = hex[i];
+	    unsigned char b2 = hex[i+1];
+	    char i1 = h2b(b1);
+	    char i2 = h2b(b2);
+
+	    if (i1 != -1 && i2 != -1) {
+		    unsigned char byte = (unsigned char)(i1 * 16 + i2);
+		    bin->push_back(byte);
+	    }
+    }
+}
+
+bool word_exists(const char *word, const char *list) {
+    std::string current;
+    for (;; ++list) {
+        if (*list != ' ' && *list != '\0') current.append(1, *list);
+        else if (current.compare(word)) {
+            current.clear();
+            if (*list == '\0') break;
+            continue;
+        }
+        else return true;
+    }
+    return false;
+}
+
+std::string capitalize(const std::string &str) {
+    std::string result = str;
+    result[0] = toupper(result[0]);
+    return result;
+}
