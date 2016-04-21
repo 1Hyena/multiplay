@@ -60,6 +60,54 @@ static void do_alarm(USER *u, const char *arg) {
     else                u->sendf("Alarm set for every %d. pulse.\n\r", pulse_int);
 }
 
+static void do_broadcas(USER *u, const char *arg) {
+    u->send("Do you mean to broadcast? You must type in the full command.\n\r");
+}
+
+static void do_broadcast(USER *u, const char *arg) {
+    MANAGER *m = u->manager;
+    INSTANCE *ins = m->instance_find(u->get_id());
+    if (!ins || !ins->user) return;
+
+    bool broadcast_before = ins->vs.getb("broadcast");
+    if (*arg == 0) {
+        ins->vs.set("broadcast", !broadcast_before);
+        bool broadcast_after = ins->vs.getb("broadcast");
+
+        if (broadcast_after) u->send("Broadcasting is now enabled.\n\r");
+        else                 u->send("Broadcasting is now disabled.\n\r");
+        return;
+    }
+
+    if (!broadcast_before) return;
+
+    for (size_t i=0; arg[i]; ++i) {
+        if (std::iscntrl(arg[i])) {
+            u->sendf("'%s' contains illegal characters.\n\r", arg);
+            return;
+        }
+    }
+
+    if (strlen(ins->vs.gets("team")) == 0) {
+        u->send("You cannot broadcast unless you are in a team.\n\r");
+        return;
+    }
+
+    std::string name;
+    u->fetch_tag(&name);
+
+    VARSET find_vs;
+    find_vs.set("team", ins->vs.gets("team"));
+    std::set<int> members;
+    m->instance_find("user", (const VARSET *) &find_vs, &members);
+    for (auto member_id : members) {
+        if (member_id == u->get_id()) continue;
+        INSTANCE *ins_member = m->instance_find(member_id);
+        if (ins_member->vs.geti("subscribed") != u->get_id()) continue;
+        ins_member->user->sendf("%s: %s\n\r", name.c_str(), arg);
+    }
+}
+
 static void do_chat(USER *u, const char *arg) {
     size_t i;
     MANAGER *m = u->manager;
@@ -429,6 +477,65 @@ static void do_su(USER *u, const char *arg) {
     else u->send("Authentication failure.\n\r");
 }
 
+static void do_subscribe(USER *u, const char *arg) {
+    MANAGER *m = u->manager;
+    INSTANCE *ins = m->instance_find(u->get_id());
+    if (!ins || !ins->user) return;
+
+    std::string name;
+    u->fetch_tag(&name);
+    int subscribed = ins->vs.geti("subscribed");
+
+    if (*arg == 0) {
+        ins->vs.set("subscribed", 0);
+
+        INSTANCE *subscribed_ins;
+        if ( (subscribed_ins = m->instance_find(subscribed)) ) {
+            std::string subscribed_tag;
+            subscribed_ins->user->fetch_tag(&subscribed_tag);
+            u->sendf("You are no longer subscribed to %s's broadcast.\n\r", subscribed_tag.c_str());
+            subscribed_ins->user->sendf("%s is no longer subscribed to your broadcast.\n\r", name.c_str());
+        }
+        else u->send("Subscribe to whose broadcast?\n\r");
+        return;
+    }
+
+    if (strlen(ins->vs.gets("team")) == 0) {
+        u->send("You cannot subscribe unless you are in a team.\n\r");
+        return;
+    }
+
+    bool found = false;
+    VARSET find_vs;
+    find_vs.set("team", ins->vs.gets("team"));
+    std::set<int> members;
+    m->instance_find("user", (const VARSET *) &find_vs, &members);
+    for (auto member_id : members) {
+        if (member_id == u->get_id()) continue;
+        INSTANCE *ins_member = m->instance_find(member_id);
+        std::string member_name;
+        ins_member->user->fetch_tag(&member_name);
+        if (str_prefix(arg, member_name.c_str())) {
+            if (member_id == subscribed) {
+                u->sendf("You have already subscribed to %s's broadcast.\n\r", member_name.c_str());
+            }
+            else {
+                ins_member->user->sendf("%s subscribed to your broadcast.\n\r", name.c_str());
+                u->sendf("You are now subscribed to %s's broadcast.\n\r", member_name.c_str());
+                ins->vs.set("subscribed", member_id);
+                INSTANCE *old_subscribe = m->instance_find(subscribed);
+                if (old_subscribe) old_subscribe->user->sendf("%s is no longer subscribed to your broadcast.\n\r", name.c_str());
+            }
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        u->send("No such user is in a team with you.\n\r");
+    }
+}
+
 static void do_switch(USER *u, const char *arg) {
     int shell_id = 0;
     int user_id = u->get_id();
@@ -496,13 +603,14 @@ void do_team(USER *u, const char *arg) {
         return;
     }
 
+    std::string old_team = ins->vs.gets("team");
     std::string tag;
     VARSET find_vs;
     std::set<int> members;
 
     if (i == 0) {
-        if (strlen(ins->vs.gets("team")) > 0) {
-            find_vs.set("team", ins->vs.gets("team"));
+        if (old_team.length() > 0) {
+            find_vs.set("team", old_team.c_str());
             m->instance_find("user", (const VARSET *) &find_vs, &members);
             u->sendf("There %s %lu member%s in your team:\n\r", members.size() == 1 ? "is" : "are", members.size(), members.size() == 1 ? "" : "s");
 
@@ -514,7 +622,7 @@ void do_team(USER *u, const char *arg) {
             }
 
             u->sendf("\n\rTeam password: %s\n\r", ins->vs.gets("team"));
-            u->send("To leave a team, execute this command with the team's password.\n\r");
+            u->send("To leave your team, provide its password as an argument.\n\r");
         }
         else {
             u->send("You are currently not part of any team.\n\r");
@@ -524,20 +632,25 @@ void do_team(USER *u, const char *arg) {
     }
 
     u->fetch_tag(&tag);
-    find_vs.set("team", arg);
+    find_vs.set("team", old_team.c_str());
     m->instance_find("user", (const VARSET *) &find_vs, &members);
+    for (auto member_id : members) {
+        if (member_id == u->get_id()) continue;
+        INSTANCE *ins_member = m->instance_find(member_id);
+        ins_member->user->sendf("%s has left the team.\n\r", tag.c_str());
+    }
 
-    if (!strcmp(arg, ins->vs.gets("team"))) {
+    if (!strcmp(arg, old_team.c_str())) {
         // Leaving a team.
         ins->vs.set("team", "");
         u->send("You leave your team.\n\r");
-        for (auto member_id : members) {
-            if (member_id == u->get_id()) continue;
-            INSTANCE *ins_member = m->instance_find(member_id);
-            ins_member->user->sendf("%s has left the team.\n\r", tag.c_str());
-        }        
         return;
     }
+
+    members.clear();
+    find_vs.clear();
+    find_vs.set("team", arg);
+    m->instance_find("user", (const VARSET *) &find_vs, &members);
 
     for (auto member_id : members) {
         INSTANCE *ins_member = m->instance_find(member_id);
@@ -551,6 +664,8 @@ void do_team(USER *u, const char *arg) {
 const struct fun_type fun_table[] = {
     { "",           "Bust a prompt.",                                      do_,           ROLE_NONE, false },
     { "alarm",      "Set an alarm for the defined number of pulses.",      do_alarm,      ROLE_NONE, false },
+    { "broadcas",   "Broadcast without having typed the full command.",    do_broadcas,   ROLE_NONE, false },
+    { "broadcast",  "Toggle broadcasting or send a message to your team.", do_broadcast,  ROLE_NONE, false },
     { "chat",       "Send a message to your team.",                        do_chat,       ROLE_NONE, false },
     { "claim",      "Claim a temporary username.",                         do_claim,      ROLE_NONE, false },
     { "connect",    "Connect a new shell to a remote host/port.",          do_connect,    ROLE_AUTH, true  },
@@ -564,6 +679,7 @@ const struct fun_type fun_table[] = {
     { "provide",    "Provide your connection as a shell to others.",       do_provide,    ROLE_NONE, false },
     { "return",     "Return from your current shell.",                     do_return,     ROLE_NONE, false },
     { "su",         "Elevate the current user to the superuser.",          do_su,         ROLE_AUTH, true  },
+    { "subscribe",  "Subscribe to the specified user's broadcast.",        do_subscribe,  ROLE_NONE, false },
     { "switch",     "Switch into another shell.",                          do_switch,     ROLE_NONE, false },
     { "team",       "Join a specified team by its password.",              do_team,       ROLE_NONE, false },
     { nullptr,      nullptr,                                               nullptr,       0,         false }

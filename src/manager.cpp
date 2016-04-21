@@ -15,6 +15,8 @@ bool MANAGER::init_ext() {
         obj->vs.set("alarm_shift", 0);
         obj->vs.set("name",       "");
         obj->vs.set("team",       "");
+        obj->vs.set("broadcast",  false);
+        obj->vs.set("subscribed",  0);
     } else return false;
     
     if ( (obj = object_add("shell")) ) {
