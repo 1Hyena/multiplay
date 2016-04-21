@@ -632,12 +632,15 @@ void do_team(USER *u, const char *arg) {
     }
 
     u->fetch_tag(&tag);
-    find_vs.set("team", old_team.c_str());
-    m->instance_find("user", (const VARSET *) &find_vs, &members);
-    for (auto member_id : members) {
-        if (member_id == u->get_id()) continue;
-        INSTANCE *ins_member = m->instance_find(member_id);
-        ins_member->user->sendf("%s has left the team.\n\r", tag.c_str());
+
+    if (old_team.length() > 0) {
+        find_vs.set("team", old_team.c_str());
+        m->instance_find("user", (const VARSET *) &find_vs, &members);
+        for (auto member_id : members) {
+            if (member_id == u->get_id()) continue;
+            INSTANCE *ins_member = m->instance_find(member_id);
+            ins_member->user->sendf("%s has left the team.\n\r", tag.c_str());
+        }
     }
 
     if (!strcmp(arg, old_team.c_str())) {
