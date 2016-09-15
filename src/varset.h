@@ -1,5 +1,5 @@
-#ifndef _VARSET_H_
-#define _VARSET_H_
+#ifndef VARSET_H_15_09_2016
+#define VARSET_H_15_09_2016
 
 #include <limits>
 #include <string>
