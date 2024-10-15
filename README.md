@@ -61,7 +61,7 @@ Tue Oct 15 14:29:15 2024 :: MultiPlay Client has finished.
 MultiPlay Client is written in the Java language and should be trivial to
 compile on most systems that have Java development kit installed. Just go to the
 _client_ directory and execute the _compile.sh_ script (if you are on Linux).
-Example build processes is shown below.
+Example build process is shown below.
 
 ```sh
 [hyena@Courage client]$ ./compile.sh
