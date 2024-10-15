@@ -289,10 +289,18 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         for (size_t host_id : guests.at(sid)) {
             cmd.clear();
 
-            first_arg(line, &cmd);
+            const char *argument = first_arg(line, &cmd);
 
-            if (whitelist.count(host_id) && whitelist.at(host_id).count(cmd)) {
-                sockets->writef(host_id, "$%s\n", line);
+            if (whitelist.count(host_id)) {
+                for (const std::string &str : whitelist.at(host_id)) {
+                    if (is_prefix(cmd.c_str(), str.c_str())) {
+                        sockets->writef(
+                            host_id, "$%s %s\n", str.c_str(), argument
+                        );
+
+                        break;
+                    }
+                }
             }
         }
 

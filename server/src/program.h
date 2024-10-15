@@ -136,17 +136,25 @@ inline bool PROGRAM::is_prefix(
 ) {
     // Return false if astr not a prefix of bstr.
 
-    if (astr == nullptr || bstr == nullptr) return false;
+    if (astr == nullptr || bstr == nullptr) {
+        return false;
+    }
+
     if (check_case) {
         for (; *astr; astr++, bstr++) {
-            if ((*astr) != (*bstr)) return false;
+            if ((*astr) != (*bstr)) {
+                return false;
+            }
         }
     }
     else {
         for (; *astr; astr++, bstr++) {
-            if (tolower(*astr) != tolower(*bstr)) return false;
+            if (tolower(*astr) != tolower(*bstr)) {
+                return false;
+            }
         }
     }
+
     return true;
 }
 

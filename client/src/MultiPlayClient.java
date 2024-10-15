@@ -522,6 +522,8 @@ public class MultiPlayClient {
 
             answers[MUD_HOST] = "stonia.ttu.ee";
             answers[MUD_PORT] = "4000";
+            answers[MPS_HOST] = "uvn-79-50.tll01.zonevs.eu";
+            answers[MPS_PORT] = "4000";
 
             log(
                 "New connection #"+client_nr+" from "+
