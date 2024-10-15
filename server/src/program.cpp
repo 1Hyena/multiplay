@@ -208,11 +208,15 @@ void PROGRAM::run() {
 }
 
 void PROGRAM::interpret(size_t sid, std::string &input) {
-    while (input.length() > 2 && input.at(0) == '$' && input.at(1) != '$') {
+    while (input.length() > 0 && input.at(0) == '$') {
         size_t nl = input.find_first_of('\n');
 
         if (nl == input.npos) {
             return;
+        }
+
+        if (input.length() > 1 && input.at(1) == '$') {
+            break;
         }
 
         std::string cmd_line = input.substr(1, nl - 1);
@@ -221,11 +225,17 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
 
         input.erase(0, nl + 1);
 
-        if (is_prefix(cmd_name.c_str(), "exit")) {
-            do_exit(*this, sid, argument);
+        if (cmd_name.empty()) {
+            sockets->write(sid, "\n\r");
         }
         else if (is_prefix(cmd_name.c_str(), "create")) {
             do_create(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "exit")) {
+            do_exit(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "help")) {
+            do_help(*this, sid, argument);
         }
         else if (is_prefix(cmd_name.c_str(), "join")) {
             do_join(*this, sid, argument);
@@ -235,9 +245,6 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         }
         else if (is_prefix(cmd_name.c_str(), "list")) {
             do_list(*this, sid, argument);
-        }
-        else if (is_prefix(cmd_name.c_str(), "help")) {
-            do_help(*this, sid, argument);
         }
         else {
             sockets->writef(sid, "Unknown command: '%s'\n\r", cmd_name.c_str());
@@ -250,13 +257,18 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         return;
     }
 
-    std::string line = input.substr(0, nl);
+    std::string linebuf = input.substr(0, nl);
+    const char *line = linebuf.c_str();
+
+    if (linebuf.length() > 1 && linebuf.at(0) == '$' && linebuf.at(1) == '$') {
+        ++line;
+    }
 
     bool lobby = true;
 
     if (guests.count(sid)) {
         for (size_t host_id : guests.at(sid)) {
-            sockets->writef(host_id, "%s\n", line.c_str());
+            sockets->writef(host_id, "%s\n", line);
         }
 
         lobby = false;
@@ -265,7 +277,7 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
     if (channels.count(sid)) {
         for (const auto &p : guests) {
             if (p.second.count(sid)) {
-                sockets->writef(p.first, "%s\n", line.c_str());
+                sockets->writef(p.first, "%s\n", line);
             }
         }
 
