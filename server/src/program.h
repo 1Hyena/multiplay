@@ -48,24 +48,28 @@ class PROGRAM {
 
     bool has_channel(size_t session_id) const;
     bool has_guest(size_t host_id, size_t guest_id) const;
+    bool has_guest(size_t guest_id) const;
+    bool has_password(size_t host_id, const char *password) const;
+    bool has_password(size_t host_id) const;
     size_t find_channel(const char *name) const;
-    void set_channel(size_t session_id, const char *name);
+    void set_channel(size_t session_id, const char *name, const char *password);
     void rem_channel(size_t session_id);
     void set_guest(size_t host_id, size_t guest_id);
     void rem_guest(size_t host_id, size_t guest_id);
     void rem_guest(size_t guest_id);
     std::map<std::string, size_t> get_channels() const;
 
-    private:
-    void interpret(size_t session_id, std::string &input);
-
-    static bool print_text(FILE *fp, const char *text, size_t length);
-    static void write_time(char *buffer, size_t length);
     static const char *first_arg(const char *argument, std::string *output);
     static bool is_prefix(
         const char *prefix, const char *whole, bool check_case =false
     );
     static void hex2bin(const char *hex, std::vector<unsigned char> *bin);
+
+    private:
+    void interpret(size_t session_id, std::string &input);
+
+    static bool print_text(FILE *fp, const char *text, size_t length);
+    static void write_time(char *buffer, size_t length);
 
     int            status;
     class OPTIONS *options;
@@ -73,6 +77,7 @@ class PROGRAM {
     class SOCKETS *sockets;
 
     std::unordered_map<size_t, std::string> channels;
+    std::unordered_map<size_t, std::string> password;
     std::unordered_map<size_t, std::unordered_set<size_t>> guests;
 
     static size_t log_size;

@@ -15,8 +15,8 @@ public class MultiPlayClient {
         "What is the port of that MUD?",
         "What is the host of the MultiPlay server?",
         "What is the port of the MultiPlay server?",
-        "What name do you want to use in the team chat?",
-        "What is the password of your team?"
+        "What name do you wish to give to your channel?",
+        "What is the password of your channel?"
     };
     private static String answers[] = null;
     private static int MUD_HOST = 0;
@@ -199,6 +199,18 @@ public class MultiPlayClient {
                 send_byte(client, '\n');
                 send_byte(client, '\r');
             }
+
+            String cmdstr = new String(command, Charset.forName("US-ASCII"));
+            String cmpstr = new String(
+                "Channel '"+answers[MPC_NAME]+"' already exists."
+            );
+
+            if (cmdstr.equals(cmpstr)) {
+                longsleep = true;
+                close_multiplay();
+                close_server();
+                close_client();
+            }
         }
     }
 
@@ -314,6 +326,7 @@ public class MultiPlayClient {
         close_multiplay();
         close_server();
         close_client();
+
         return false;
     }
 
@@ -347,7 +360,8 @@ public class MultiPlayClient {
             }
             else {
                 send(
-                    multiplay, "$create "+answers[MPC_NAME]+"\n"
+                    multiplay,
+                    "$create '"+answers[MPC_NAME]+"' "+answers[MPC_PASS]+"\n"
                 );
             }
 

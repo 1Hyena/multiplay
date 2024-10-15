@@ -110,9 +110,9 @@ shown below.
 ```sh
 [hyena@Courage ~]$ nc localhost 4000
 Available commands:
-    $create <channel name>
-    $join   <channel name>
-    $leave  <channel name>
+    $create <channel name> [password]
+    $join   <channel name> [password]
+    $leave  [channel name]
     $list
     $help
     $exit

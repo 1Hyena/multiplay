@@ -527,6 +527,14 @@ bool PROGRAM::has_channel(size_t session_id) const {
     return channels.count(session_id);
 }
 
+bool PROGRAM::has_password(size_t host_id) const {
+    return password.count(host_id);
+}
+
+bool PROGRAM::has_password(size_t host_id, const char *pass) const {
+    return password.count(host_id) ? !password.at(host_id).compare(pass) : true;
+}
+
 bool PROGRAM::has_guest(size_t host_id, size_t guest_id) const {
     if (!guests.count(guest_id)) {
         return false;
@@ -541,6 +549,10 @@ bool PROGRAM::has_guest(size_t host_id, size_t guest_id) const {
     return false;
 }
 
+bool PROGRAM::has_guest(size_t guest_id) const {
+    return guests.count(guest_id);
+}
+
 size_t PROGRAM::find_channel(const char *name) const {
     for (const auto &p : channels) {
         if (!strcmp(name, p.second.c_str())) {
@@ -551,8 +563,12 @@ size_t PROGRAM::find_channel(const char *name) const {
     return 0;
 }
 
-void PROGRAM::set_channel(size_t session_id, const char *name) {
-    channels[session_id] = name;
+void PROGRAM::set_channel(size_t sid, const char *name, const char *pass) {
+    channels[sid] = std::string(name);
+
+    if (*pass) {
+        password[sid] = pass;
+    };
 }
 
 void PROGRAM::rem_channel(size_t session_id) {
@@ -575,6 +591,7 @@ void PROGRAM::rem_channel(size_t session_id) {
     }
 
     channels.erase(session_id);
+    password.erase(session_id);
 }
 
 void PROGRAM::set_guest(size_t host_id, size_t guest_id) {
@@ -591,12 +608,6 @@ void PROGRAM::rem_guest(size_t host_id, size_t guest_id) {
     if (guests[guest_id].empty()) {
         guests.erase(guest_id);
     }
-
-    sockets->writef(
-        host_id,
-        "Guest #%06lx@%s:%s has left your channel.\n\r",
-        guest_id, sockets->get_host(guest_id), sockets->get_port(guest_id)
-    );
 }
 
 void PROGRAM::rem_guest(size_t guest_id) {
