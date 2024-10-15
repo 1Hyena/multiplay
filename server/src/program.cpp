@@ -10,6 +10,7 @@
 #include "program.h"
 #include "signals.h"
 #include "sockets.h"
+#include "fun.h"
 
 volatile sig_atomic_t
     SIGNALS::sig_alarm{0},
@@ -78,7 +79,7 @@ void PROGRAM::run() {
     }
 
     std::unordered_map<size_t, long long> timestamp_map;
-    std::unordered_set<size_t> clients;
+    std::unordered_map<size_t, std::string> clients;
 
     static constexpr const size_t USEC_PER_SEC = 1000000;
     bool alarmed = false;
@@ -148,6 +149,9 @@ void PROGRAM::run() {
                     timestamp_map.erase(sid);
                 }
 
+                rem_guest(sid);
+                rem_channel(sid);
+
                 if (clients.count(sid)) {
                     clients.erase(sid);
                     continue;
@@ -159,7 +163,7 @@ void PROGRAM::run() {
                 SOCKETS::SESSION listener = sockets->get_listener(sid);
 
                 if (listener.id == session.id) {
-                    clients.insert(sid);
+                    clients[sid];
                 }
                 else {
                     log("forbidden condition met (%s:%d)", __FILE__, __LINE__);
@@ -169,21 +173,17 @@ void PROGRAM::run() {
                     "session #%06lx@%s:%s connected",
                     sid, sockets->get_host(sid), sockets->get_port(sid)
                 );
+
+                do_help(*this, sid, "");
             }
             else if (alert.event == SOCKETS::INCOMING) {
-                log(
-                    "session #%06lx@%s:%s: %s", sid, sockets->get_host(sid),
-                    sockets->get_port(sid), sockets->read(sid)
-                );
                 timestamp_map[sid] = timestamp;
+                clients[sid].append(sockets->read(sid));
+                interpret(sid, clients[sid]);
             }
         }
 
-        if (alarmed) {
-            log("%s", "alarmed");
-        }
-
-        uint32_t idle_timeout = 10;
+        uint32_t idle_timeout = 60*10;
 
         if (idle_timeout > 0 && alarmed) {
             for (const auto &p : timestamp_map) {
@@ -205,6 +205,84 @@ void PROGRAM::run() {
     while (!terminated);
 
     return;
+}
+
+void PROGRAM::interpret(size_t sid, std::string &input) {
+    while (input.length() > 2 && input.at(0) == '$' && input.at(1) != '$') {
+        size_t nl = input.find_first_of('\n');
+
+        if (nl == input.npos) {
+            return;
+        }
+
+        std::string cmd_line = input.substr(1, nl - 1);
+        std::string cmd_name;
+        const char *argument = first_arg(cmd_line.c_str(), &cmd_name);
+
+        input.erase(0, nl + 1);
+
+        if (is_prefix(cmd_name.c_str(), "exit")) {
+            do_exit(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "create")) {
+            do_create(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "join")) {
+            do_join(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "leave")) {
+            do_leave(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "list")) {
+            do_list(*this, sid, argument);
+        }
+        else if (is_prefix(cmd_name.c_str(), "help")) {
+            do_help(*this, sid, argument);
+        }
+        else {
+            sockets->writef(sid, "Unknown command: '%s'\n\r", cmd_name.c_str());
+        }
+    }
+
+    size_t nl = input.find_first_of('\n');
+
+    if (nl == input.npos) {
+        return;
+    }
+
+    std::string line = input.substr(0, nl);
+
+    bool lobby = true;
+
+    if (guests.count(sid)) {
+        for (size_t host_id : guests.at(sid)) {
+            sockets->writef(host_id, "%s\n", line.c_str());
+        }
+
+        lobby = false;
+    }
+
+    if (channels.count(sid)) {
+        for (const auto &p : guests) {
+            if (p.second.count(sid)) {
+                sockets->writef(p.first, "%s\n", line.c_str());
+            }
+        }
+
+        lobby = false;
+    }
+
+    if (lobby) {
+        if (nl) {
+            input.insert(0, 1, '$');
+            return interpret(sid, input);
+        }
+        else {
+            sockets->write(sid, "You are not in any channel yet.\n\r");
+        }
+    }
+
+    input.erase(0, nl + 1);
 }
 
 bool PROGRAM::init(int argc, char **argv) {
@@ -354,7 +432,7 @@ void PROGRAM::print_log(const char *origin, const char *p_fmt, ...) {
     free(buf);
 }
 
-void PROGRAM::log(const char *p_fmt, ...) {
+void PROGRAM::log(const char *p_fmt, ...) const {
     va_list ap;
     char *buf = nullptr;
     char *newbuf = nullptr;
@@ -414,4 +492,106 @@ long long PROGRAM::get_timestamp() const {
     return std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
+}
+
+SOCKETS *PROGRAM::get_sockets() const {
+    return sockets;
+}
+
+bool PROGRAM::has_channel(size_t session_id) const {
+    return channels.count(session_id);
+}
+
+bool PROGRAM::has_guest(size_t host_id, size_t guest_id) const {
+    if (!guests.count(guest_id)) {
+        return false;
+    }
+
+    for (size_t session_id : guests.at(guest_id)) {
+        if (session_id == host_id) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+size_t PROGRAM::find_channel(const char *name) const {
+    for (const auto &p : channels) {
+        if (!strcmp(name, p.second.c_str())) {
+            return p.first;
+        }
+    }
+
+    return 0;
+}
+
+void PROGRAM::set_channel(size_t session_id, const char *name) {
+    channels[session_id] = name;
+}
+
+void PROGRAM::rem_channel(size_t session_id) {
+    std::vector<size_t> kicked;
+
+    for (const auto &p : guests) {
+        for (size_t host_id : p.second) {
+            if (host_id == session_id) {
+                kicked.emplace_back(p.first);
+            }
+        }
+    }
+
+    for (size_t guest_id : kicked) {
+        rem_guest(session_id, guest_id);
+        sockets->writef(
+            guest_id,
+            "Channel '%s' has been closed.\n\r", channels[session_id].c_str()
+        );
+    }
+
+    channels.erase(session_id);
+}
+
+void PROGRAM::set_guest(size_t host_id, size_t guest_id) {
+    guests[guest_id].insert(host_id);
+}
+
+void PROGRAM::rem_guest(size_t host_id, size_t guest_id) {
+    if (!guests.count(guest_id) || !channels.count(host_id)) {
+        return;
+    }
+
+    guests[guest_id].erase(host_id);
+
+    if (guests[guest_id].empty()) {
+        guests.erase(guest_id);
+    }
+
+    sockets->writef(
+        host_id,
+        "Guest #%06lx@%s:%s has left your channel.\n\r",
+        guest_id, sockets->get_host(guest_id), sockets->get_port(guest_id)
+    );
+}
+
+void PROGRAM::rem_guest(size_t guest_id) {
+    std::vector<size_t> hosts;
+
+    for (size_t host_id : guests[guest_id]) {
+        hosts.emplace_back(host_id);
+    }
+
+    for (size_t host_id : hosts) {
+        rem_guest(host_id, guest_id);
+    }
+}
+
+std::map<std::string, size_t> PROGRAM::get_channels() const {
+    std::map<std::string, size_t> list;
+
+    for (const auto &p : channels) {
+        list.emplace(p.second, p.first);
+    }
+
+    return list;
 }
