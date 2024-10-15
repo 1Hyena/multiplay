@@ -56,6 +56,19 @@ Tue Oct 15 14:29:15 2024 :: MultiPlay Client has finished.
 ```
 
 
+## Build Instructions ##########################################################
+
+MultiPlay Client is written in the Java language and should be trivial to
+compile on most systems that have Java development kit installed. Just go to the
+_client_ directory and execute the _compile.sh_ script (if you are on Linux).
+Example build processes is shown below.
+
+```sh
+[hyena@Courage client]$ ./compile.sh
+Tue Oct 15 14:54:30 2024 :: MultiPlayClient.java compiled.
+```
+
+
 # Server #######################################################################
 
 The MultiPlay Server is a C++ application that listens on a specified TCP port
