@@ -237,6 +237,19 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         else if (is_prefix(cmd_name.c_str(), "help")) {
             do_help(*this, sid, argument);
         }
+        else if (is_prefix(cmd_name.c_str(), "hexmsg")) {
+            if (channels.count(sid)) {
+                std::vector<unsigned char> buf;
+
+                hex2bin(argument, &buf);
+
+                for (const auto &p : guests) {
+                    if (p.second.count(sid)) {
+                        sockets->write(p.first, buf.data(), buf.size());
+                    }
+                }
+            }
+        }
         else if (is_prefix(cmd_name.c_str(), "join")) {
             do_join(*this, sid, argument);
         }
@@ -268,7 +281,7 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
 
     if (guests.count(sid)) {
         for (size_t host_id : guests.at(sid)) {
-            sockets->writef(host_id, "%s\n", line);
+            sockets->writef(host_id, "$%s\n", line);
         }
 
         lobby = false;

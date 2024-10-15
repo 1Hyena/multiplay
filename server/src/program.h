@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <map>
+#include <cstring>
+#include <vector>
 
 class PROGRAM {
     public:
@@ -63,6 +65,7 @@ class PROGRAM {
     static bool is_prefix(
         const char *prefix, const char *whole, bool check_case =false
     );
+    static void hex2bin(const char *hex, std::vector<unsigned char> *bin);
 
     int            status;
     class OPTIONS *options;
@@ -135,6 +138,30 @@ inline bool PROGRAM::is_prefix(
         }
     }
     return true;
+}
+
+inline void PROGRAM::hex2bin(const char *hex, std::vector<unsigned char> *bin) {
+    auto h2b = [](unsigned char c) -> char
+    {
+             if(c >= 48 && c <=  57) return (char) (c - 48);
+        else if(c >= 97 && c <= 102) return (char) (c - 97 + 10);
+        else if(c >= 65 && c <=  70) return (char) (c - 65 + 10);
+        return -1;
+    };
+
+    size_t len = std::strlen(hex);
+
+    for (size_t i = 0; i < len; i = i+2){
+	    unsigned char b1 = hex[i];
+	    unsigned char b2 = hex[i+1];
+	    char i1 = h2b(b1);
+	    char i2 = h2b(b2);
+
+	    if (i1 != -1 && i2 != -1) {
+		    unsigned char byte = (unsigned char)(i1 * 16 + i2);
+		    bin->push_back(byte);
+	    }
+    }
 }
 
 #endif

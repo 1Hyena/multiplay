@@ -38,13 +38,7 @@ public class MultiPlayClient {
     private static int                   client_port     = 4000;
     private static boolean               initializing    = false;
     private static int                   telnet_command  = 0;
-    private static boolean               broadcasting    = false;
-    private static boolean               trigger_start   = true;
-    private static String                trigger_buffer  = "";
-    private static String                triggers[] = {
-        "Broadcasting is now enabled.",
-        "Broadcasting is now disabled."
-    };
+    private static int                   multiplay_telnet= 0;
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
@@ -127,6 +121,7 @@ public class MultiPlayClient {
     }
 
     final protected static char[] hexArray = "0123456789ABCDEF".toCharArray();
+
     public static String bytesToHex(byte[] bytes) {
         char[] hexChars = new char[bytes.length * 2];
         for ( int j = 0; j < bytes.length; j++ ) {
@@ -137,7 +132,7 @@ public class MultiPlayClient {
         return new String(hexChars);
     }
 
-    public static void interpret(Socket client, byte[] command) {
+    public static void interpret_client(Socket client, byte[] command) {
         if (question < questions.length) {
             if (command.length > 0) {
                 answers[question] = new String(command);
@@ -165,13 +160,9 @@ public class MultiPlayClient {
         }
 
         if (command.length > 0 && command[0] == '$') {
-            int sz = command.length;
-            int i;
-            for (i=0; i+1<sz; i++) command[i] = command[i+1];
-            command[i] = '\n';
-
             if (multiplay != null) {
                 send_bytes(multiplay, command);
+                send_byte(multiplay, '\n');
             }
             else {
                 send(
@@ -183,17 +174,30 @@ public class MultiPlayClient {
             if (server != null) {
                 send_bytes(server, command);
                 send_byte(server, '\n');
-
-                if (multiplay != null
-                && broadcasting
-                && (new String(command)).trim().length() > 0) {
-                    send(multiplay, "broadcast ");
-                    send_bytes(multiplay, command);
-                    send_byte(multiplay, '\n');
-                }
             }
             else {
                 send(client, "You are not connected to the MUD server.\n\r");
+            }
+        }
+    }
+
+    public static void interpret_multiplay(Socket multiplay, byte[] command) {
+        if (command.length > 0 && command[0] == '$') {
+            if (server != null) {
+                for (int i = 1; i < command.length; i++) {
+                    command[i-1] = command[i];
+                }
+
+                command[command.length - 1] = '\n';
+
+                send_bytes(server, command);
+            }
+        }
+        else {
+            if (client != null) {
+                send_bytes(client, command);
+                send_byte(client, '\n');
+                send_byte(client, '\r');
             }
         }
     }
@@ -230,7 +234,6 @@ public class MultiPlayClient {
             return false;
         }
 
-        // Write client output.
         if (server_message.size() > 0) {
             try {
                 client.getOutputStream().write(server_message.toByteArray());
@@ -239,19 +242,22 @@ public class MultiPlayClient {
                 bug(e.toString());
                 return false;
             }
-            server_message.reset();
-        }
 
-        if (multiplay_text.size() > 0) {
             try {
-                client.getOutputStream().write(multiplay_text.toByteArray());
-                client.getOutputStream().flush();
+                send(multiplay, "$hexmsg ");
+                multiplay.getOutputStream().write(
+                    bytesToHex(server_message.toByteArray()).getBytes(
+                        Charset.forName("UTF-8")
+                    )
+                );
+                send(multiplay, "\n");
+                multiplay.getOutputStream().flush();
             } catch (IOException e) {
                 bug(e.toString());
                 return false;
             }
 
-            multiplay_text.reset();
+            server_message.reset();
         }
 
         // Read client input.
@@ -282,7 +288,7 @@ public class MultiPlayClient {
             }
             else {
                 if (next_byte == '\n') {
-                    interpret(client, client_command.toByteArray());
+                    interpret_client(client, client_command.toByteArray());
                     client_command.reset();
                     return false;
                 }
@@ -341,7 +347,7 @@ public class MultiPlayClient {
             }
             else {
                 send(
-                    multiplay, "$channel "+answers[MPC_NAME]+"\n"
+                    multiplay, "$create "+answers[MPC_NAME]+"\n"
                 );
             }
 
@@ -364,65 +370,42 @@ public class MultiPlayClient {
         }
 
         if (next_byte != -1) {
-            if (next_byte >= 0 && next_byte <= 255) {
-                boolean persist_trigger = (next_byte == '\r' && trigger_start);
+            if (multiplay_telnet > 0) {
+                multiplay_telnet--;
+                return true;
+            }
+            else {
+                if (next_byte == '\n') {
+                    interpret_multiplay(
+                        multiplay, multiplay_text.toByteArray()
+                    );
 
-                if (trigger_start) {
-                    byte[] bs = new byte[] {(byte) next_byte};
+                    multiplay_text.reset();
 
-                    int len = trigger_buffer.length();
-                    boolean found = false;
-
-                    for (int i=0; i<triggers.length; i++) {
-                        if (triggers[i].length() <= len) continue;
-                        if ((byte) triggers[i].charAt(len) == next_byte) {
-                            trigger_buffer+=new String(bs);
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (found) {
-                        for (int i=0; i<triggers.length; i++) {
-                            if (trigger_buffer.equals(triggers[i])) {
-                                log("TRIGGER: "+trigger_buffer);
-                                trigger(trigger_buffer);
-                                found = false;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!found) {
-                        trigger_buffer = "";
-                        trigger_start  = false;
-                    }
+                    return false;
                 }
+                else if (next_byte == 0xff) {
+                    multiplay_telnet = 2;
 
-                if (!trigger_start) {
-                    if (next_byte == '\n' || persist_trigger) {
-                        trigger_start = true;
+                    return true;
+                }
+                else if (multiplay_text.size() < 1024) {
+                    if (next_byte != '\r') {
+                        multiplay_text.write(next_byte);
                     }
+
+                    return true;
+                }
+                else {
+                    log("Message from MultiPlay too long, closing!");
                 }
             }
-
-            multiplay_text.write(next_byte);
-
-            return true;
         }
 
         longsleep = true;
         close_multiplay();
 
         return false;
-    }
-
-    private static void trigger(String event) {
-        if (event.equals("Broadcasting is now enabled.")) {
-            broadcasting = true;
-        }
-        else if (event.equals("Broadcasting is now disabled.")) {
-            broadcasting = false;
-        }
     }
 
     public static boolean step_server() {
@@ -456,7 +439,6 @@ public class MultiPlayClient {
                 else {
                     send(
                         client,
-                        "\n\r"+
                         "You are now multiplaying like a boss!\n\r"+
                         "\n\r"+
                         "Type $help to see the list of commands.\n\r"+
@@ -518,9 +500,6 @@ public class MultiPlayClient {
             question = 0;
             initializing = true;
             telnet_command = 0;
-            broadcasting = false;
-            trigger_buffer = "";
-            trigger_start = true;
             answers = new String[questions.length];
 
             for (int i=0; i<questions.length; i++) {
