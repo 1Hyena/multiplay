@@ -108,6 +108,52 @@ void do_leave(PROGRAM &program, size_t sid, const char *argument) {
     sockets->writef(sid, "You left channel '%s'.\n\r", argument);
 }
 
+void do_allow(PROGRAM &program, size_t sid, const char *argument) {
+    SOCKETS *sockets = program.get_sockets();
+
+    if (*argument == '\0') {
+        sockets->write(
+            sid, "Which commands do you wish to allow in your channel?\n\r"
+        );
+
+        return;
+    }
+
+    std::string command;
+    size_t allowed = 0;
+    size_t disallowed = 0;
+
+    for (argument = PROGRAM::first_arg(argument, &command); !command.empty();) {
+        if (!command.empty()) {
+            if (program.set_whitelist(sid, command.c_str())) {
+                sockets->writef(
+                    sid, "Allowed the '%s' command in your channel.\n\r",
+                    command.c_str()
+                );
+
+                ++allowed;
+            }
+            else if (program.rem_whitelist(sid, command.c_str())) {
+                sockets->writef(
+                    sid, "Disallowed the '%s' command in your channel.\n\r",
+                    command.c_str()
+                );
+
+                ++disallowed;
+            }
+        }
+
+        command.clear();
+        argument = PROGRAM::first_arg(argument, &command);
+    }
+
+    if (!allowed && !disallowed) {
+        sockets->write(
+            sid, "No changes occurred in your channel command whitelist.\n\r"
+        );
+    }
+}
+
 void do_exit(PROGRAM &program, size_t sid, const char *argument) {
     program.get_sockets()->write(
         sid, "Alas, all good things come to an end.\n\r"
@@ -146,6 +192,7 @@ void do_help(PROGRAM &program, size_t sid, const char *argument) {
         "    $create <channel name> [password]\n\r"
         "    $join   <channel name> [password]\n\r"
         "    $leave  [channel name]\n\r"
+        "    $allow  <command> [command] ...\n\r"
         "    $list\n\r"
         "    $help\n\r"
         "    $exit\n\r"

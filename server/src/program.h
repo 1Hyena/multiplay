@@ -10,6 +10,7 @@
 #include <map>
 #include <cstring>
 #include <vector>
+#include <set>
 
 class PROGRAM {
     public:
@@ -57,6 +58,9 @@ class PROGRAM {
     void set_guest(size_t host_id, size_t guest_id);
     void rem_guest(size_t host_id, size_t guest_id);
     void rem_guest(size_t guest_id);
+    bool set_whitelist(size_t host_id, const char *command);
+    bool rem_whitelist(size_t host_id, const char *command);
+    void rem_whitelist(size_t host_id);
     std::map<std::string, size_t> get_channels() const;
 
     static const char *first_arg(const char *argument, std::string *output);
@@ -79,6 +83,7 @@ class PROGRAM {
     std::unordered_map<size_t, std::string> channels;
     std::unordered_map<size_t, std::string> password;
     std::unordered_map<size_t, std::unordered_set<size_t>> guests;
+    std::unordered_map<size_t, std::set<std::string>> whitelist;
 
     static size_t log_size;
     static bool   log_time;

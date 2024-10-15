@@ -108,7 +108,7 @@ void PROGRAM::run() {
                     fprintf(stderr, "%s", "\n");
 
                     log(
-                        "caught signal %d (%s).", sig,
+                        "caught signal %d (%s)", sig,
                         sig_name ? sig_name : "unknown"
                     );
 
@@ -151,6 +151,7 @@ void PROGRAM::run() {
 
                 rem_guest(sid);
                 rem_channel(sid);
+                rem_whitelist(sid);
 
                 if (clients.count(sid)) {
                     clients.erase(sid);
@@ -228,6 +229,9 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         if (cmd_name.empty()) {
             sockets->write(sid, "\n\r");
         }
+        else if (is_prefix(cmd_name.c_str(), "allow")) {
+            do_allow(*this, sid, argument);
+        }
         else if (is_prefix(cmd_name.c_str(), "create")) {
             do_create(*this, sid, argument);
         }
@@ -280,8 +284,16 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
     bool lobby = true;
 
     if (guests.count(sid)) {
+        std::string cmd;
+
         for (size_t host_id : guests.at(sid)) {
-            sockets->writef(host_id, "$%s\n", line);
+            cmd.clear();
+
+            first_arg(line, &cmd);
+
+            if (whitelist.count(host_id) && whitelist.at(host_id).count(cmd)) {
+                sockets->writef(host_id, "$%s\n", line);
+            }
         }
 
         lobby = false;
@@ -592,6 +604,45 @@ void PROGRAM::rem_channel(size_t session_id) {
 
     channels.erase(session_id);
     password.erase(session_id);
+}
+
+bool PROGRAM::set_whitelist(size_t sid, const char *command) {
+    std::string cmdstr(command);
+
+    if (whitelist.count(sid) && whitelist.at(sid).count(cmdstr)) {
+        return false;
+    }
+
+    whitelist[sid].insert(cmdstr);
+    return true;
+}
+
+bool PROGRAM::rem_whitelist(size_t sid, const char *command) {
+    std::string cmdstr(command);
+
+    if (!whitelist.count(sid) || !whitelist.at(sid).count(cmdstr)) {
+        return false;
+    }
+
+    whitelist[sid].erase(cmdstr);
+
+    if (whitelist.at(sid).empty()) {
+        whitelist.erase(sid);
+    }
+
+    return true;
+}
+
+void PROGRAM::rem_whitelist(size_t sid) {
+    std::vector<std::string> commands;
+
+    for (const std::string &command : whitelist[sid]) {
+        commands.emplace_back(command);
+    }
+
+    for (const std::string &command : commands) {
+        rem_whitelist(sid, command.c_str());
+    }
 }
 
 void PROGRAM::set_guest(size_t host_id, size_t guest_id) {

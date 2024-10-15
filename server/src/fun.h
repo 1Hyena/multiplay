@@ -9,5 +9,6 @@ void do_join  (PROGRAM &program, size_t sid, const char *argument);
 void do_leave (PROGRAM &program, size_t sid, const char *argument);
 void do_list  (PROGRAM &program, size_t sid, const char *argument);
 void do_help  (PROGRAM &program, size_t sid, const char *argument);
+void do_allow (PROGRAM &program, size_t sid, const char *argument);
 
 #endif

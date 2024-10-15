@@ -113,6 +113,7 @@ Available commands:
     $create <channel name> [password]
     $join   <channel name> [password]
     $leave  [channel name]
+    $allow  <command> [command] ...
     $list
     $help
     $exit
