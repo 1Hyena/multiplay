@@ -102,7 +102,7 @@ Process exits with errors.
 
 ## Commands ####################################################################
 
-When connected to the MPS, the user will gain access to a list of commands, that
+When connected to the MPS, the user will gain access to a list of commands that
 start with the dollar sign prefix _$_. If the user has not created or joined any
 channels, then the prefix is not required. The list of available commands is
 shown below.
