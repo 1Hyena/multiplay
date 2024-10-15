@@ -1522,7 +1522,7 @@ inline SOCKETS::ERROR SOCKETS::report(
             }
             else {
                 if (::write(STDERR_FILENO, bufptr, strlen(bufptr)) > 0) {
-                    ::write(STDERR_FILENO, "\n", 1);
+                    (void)!::write(STDERR_FILENO, "\n", 1);
                 }
             }
 
@@ -1541,7 +1541,7 @@ inline SOCKETS::ERROR SOCKETS::report(
                 }
                 else {
                     if (::write(STDERR_FILENO, OOM, strlen(OOM)) > 0) {
-                        ::write(STDERR_FILENO, "\n", 1);
+                        (void)!::write(STDERR_FILENO, "\n", 1);
                     }
                 }
             }
@@ -1552,7 +1552,7 @@ inline SOCKETS::ERROR SOCKETS::report(
             }
             else {
                 if (::write(STDERR_FILENO, bufptr, strlen(bufptr)) > 0) {
-                    ::write(STDERR_FILENO, "\n", 1);
+                    (void)!::write(STDERR_FILENO, "\n", 1);
                 }
             }
 
