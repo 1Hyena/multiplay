@@ -1,17 +1,17 @@
-^\w+ tells you '.*'$
+^\w+ tells you '.+'$
     log sfx:alert.wav
 
-^\w+ tells the group '.*'.$
+^\w+ tells the group '.+'.$
     log sfx:alert.wav
 
-^\w+ gossips '.*'$
+^\w+ gossips '.+'$
     log
 
-^\w+ narrates '.*'$
+^\w+ narrates '.+'$
     log
 
-^\w+ yells '.*'$
+^\w+ yells '.+'$
     log
 
-^\w+ says '.*'$
+^\w+ says '.+'$
     log
