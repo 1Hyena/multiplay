@@ -2,14 +2,30 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.Charset;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import javax.sound.sampled.*;
+import java.io.File;
+import java.io.IOException;
+import javax.sound.sampled.LineEvent.Type;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 public class MultiPlayClient {
-    public static String version      = "2.0";
-    private static boolean doexit     = false;
-    private static boolean canexit    = false;
-    private static boolean longsleep  = false;
-    private static int client_nr      = 0;
-    private static int question       = 0;
+    public static String version     = "2.0";
+    private static boolean canexit   = false;
+    private static boolean doexit    = false;
+    private static boolean longsleep = false;
+    private static int client_nr     = 0;
+    private static int question      = 0;
     private static String questions[] = {
         "What is the host of the MUD you wish to play?",
         "What is the port of that MUD?",
@@ -26,6 +42,7 @@ public class MultiPlayClient {
     private static int MPC_NAME = 4;
     private static int MPC_PASS = 5;
 
+    private static AtomicBoolean exiting = null;
     private static ServerSocket acceptor = null;
     private static Socket client    = null;
     private static Socket server    = null;
@@ -34,11 +51,14 @@ public class MultiPlayClient {
     private static int                   socket_timeout  = 1;
     private static ByteArrayOutputStream client_command  = null;
     private static ByteArrayOutputStream server_message  = null;
+    private static ByteArrayOutputStream filter_message  = null;
     private static ByteArrayOutputStream multiplay_text  = null;
     private static int                   client_port     = 4000;
     private static boolean               initializing    = false;
     private static int                   telnet_command  = 0;
     private static int                   multiplay_telnet= 0;
+    private static Queue<String>         playlist        = null;
+    private static Map<String, Set<String>> patterns     = null;
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
@@ -49,17 +69,93 @@ public class MultiPlayClient {
             catch (NumberFormatException e) {
                 log("Invalid port number: "+args[0]);
             }
+
+            String filename = args.length > 1 ? args[1] : "patterns.txt";
+            File file = new File(filename);
+
+            if (file.exists() && file.canRead()) {
+                patterns = new HashMap<String, Set<String>>();
+
+                try {
+                    List<String> lines = Files.readAllLines(
+                        Paths.get(filename)
+                    );
+
+                    String pattern = "";
+
+                    for (String line : lines) {
+                        if (line.startsWith("^")) {
+                            pattern = line;
+
+                            if (!patterns.containsKey(line)) {
+                                patterns.put(line, new HashSet<>());
+                            }
+                        }
+                        else if (!pattern.isEmpty() && !line.isEmpty()) {
+                            String[] parts = line.trim().split(" ", 0);
+
+                            for (String part : parts) {
+                                patterns.get(pattern).add(part.trim());
+                            }
+                        }
+                    }
+
+                    if (patterns.size() == 0) {
+                        patterns = null;
+                    }
+                } catch (IOException e) {
+                    bug(e.toString());
+                    patterns = null;
+                }
+            }
         }
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                log("Shutdown sequence initiated.");
-                doexit = true;
-                while (!canexit) Thread.yield();
-                log("MultiPlay Client has finished.");
+        exiting = new AtomicBoolean(false);
+        playlist = new ConcurrentLinkedQueue<>();
+
+        Runtime.getRuntime().addShutdownHook(
+            new Thread() {
+                @Override
+                public void run() {
+                    log("Shutdown sequence initiated.");
+                    doexit = true;
+                    while (!canexit) Thread.yield();
+                    log("MultiPlay Client has finished.");
+                }
             }
-        });
+        );
+
+        Thread soundplayer = new Thread() {
+            public void run() {
+                while (!exiting.get()) {
+                    if (!playlist.isEmpty()) {
+                        File soundfile = new File(playlist.poll());
+
+                        if (soundfile.exists() && soundfile.canRead()) {
+                            try {
+                                playClip(soundfile);
+                            } catch (IOException e) {
+                                bug(e.toString());
+                            } catch (UnsupportedAudioFileException e) {
+                                bug(e.toString());
+                            } catch (LineUnavailableException e) {
+                                bug(e.toString());
+                            } catch (InterruptedException e) {
+                                bug(e.toString());
+                            }
+                        }
+                    }
+
+                    try {
+                        Thread.sleep(100);
+                    }
+                    catch (InterruptedException e){
+                        System.out.println(e);
+                    }
+                }
+            }
+        };
+        soundplayer.start();
 
         try {
             log("Starting MultiPlay Client v"+version+".");
@@ -69,14 +165,24 @@ public class MultiPlayClient {
             PrintWriter pw = new PrintWriter(sw);
             e.printStackTrace(pw);
             bug(sw.toString());
-            canexit = true; // Emergency shutdown...
         }
+
         close_all();
+        exiting.set(true);
+
+        try {
+            soundplayer.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        canexit = true;
     }
 
     public static void runServer() throws IOException {
         client_command = new ByteArrayOutputStream(256);
         server_message = new ByteArrayOutputStream(1024);
+        filter_message = new ByteArrayOutputStream(1024);
         multiplay_text = new ByteArrayOutputStream(1024);
         acceptor = create_acceptor(client_port);
 
@@ -92,9 +198,6 @@ public class MultiPlayClient {
                 Thread.currentThread().interrupt();
             }
         }
-
-        close_all();
-        canexit = true;
     }
 
     public static void greet(Socket client) {
@@ -214,6 +317,60 @@ public class MultiPlayClient {
         }
     }
 
+    public static ByteArrayOutputStream interpret_filter(
+        ByteArrayOutputStream filter
+    ) {
+        byte[] bytes = filter.toByteArray();
+
+        int pos = 0;
+
+        for (int i = 0; i < bytes.length; i++) {
+            if (bytes[i] == '\n') {
+                interpret_filter_line(
+                    new String(
+                        bytes, pos, i - pos, Charset.forName("US-ASCII")
+                    ).trim()
+                );
+
+                pos = i+1;
+            }
+        }
+
+        ByteArrayOutputStream remaining = new ByteArrayOutputStream(
+            bytes.length - pos
+        );
+
+        remaining.write(bytes, pos, bytes.length - pos);
+
+        return remaining;
+    }
+
+    public static void interpret_filter_line(String line) {
+        for (Map.Entry<String, Set<String>> entry : patterns.entrySet()) {
+            Pattern pattern = Pattern.compile(entry.getKey());
+            Matcher matcher = pattern.matcher(line);
+
+            if (!matcher.find()) {
+                continue;
+            }
+
+            for (String param : entry.getValue()) {
+                if (param.equals("log")) {
+                    log(line);
+                }
+                else if (param.startsWith("sfx:")) {
+                    String sfx = param.substring(param.indexOf(":") + 1);
+
+                    if (!sfx.isEmpty()) {
+                        playlist.add(sfx);
+                    }
+                }
+            }
+
+            break;
+        }
+    }
+
     public static void send(Socket to, String message) {
         try {
             to.getOutputStream().write(
@@ -268,6 +425,15 @@ public class MultiPlayClient {
                 bug(e.toString());
                 return false;
             }
+
+            try {
+                server_message.writeTo(filter_message);
+            } catch (IOException e) {
+                bug(e.toString());
+                return false;
+            }
+
+            filter_message = interpret_filter(filter_message);
 
             server_message.reset();
         }
@@ -671,5 +837,46 @@ public class MultiPlayClient {
             "\u001B[1;31m%1$ta %1$tb %1$td %1$tH:%1$tM:%1$tS %1$tY ::"+
             "\u001B[0m %2$s\n", date, text
         );
+    }
+
+    private static void playClip(File clipFile) throws IOException,
+    UnsupportedAudioFileException, LineUnavailableException,
+    InterruptedException {
+        class AudioListener implements LineListener {
+            private boolean done = false;
+            @Override public synchronized void update(LineEvent event) {
+                Type eventType = event.getType();
+                if (eventType == Type.STOP || eventType == Type.CLOSE) {
+                    done = true;
+                    notifyAll();
+                }
+            }
+            public synchronized void waitUntilDone(
+            ) throws InterruptedException {
+                while (!done) {
+                    wait();
+                }
+            }
+        }
+
+        AudioListener listener = new AudioListener();
+        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(
+            clipFile
+        );
+
+        try {
+            Clip clip = AudioSystem.getClip();
+            clip.addLineListener(listener);
+            clip.open(audioInputStream);
+
+            try {
+                clip.start();
+                listener.waitUntilDone();
+            } finally {
+                clip.close();
+            }
+        } finally {
+            audioInputStream.close();
+        }
     }
 }
