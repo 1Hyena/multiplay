@@ -78,7 +78,6 @@ void PROGRAM::run() {
         log("listening on port %d...", static_cast<int>(get_port()));
     }
 
-    std::unordered_map<size_t, long long> timestamp_map;
     std::unordered_map<size_t, std::string> clients;
 
     static constexpr const size_t USEC_PER_SEC = 1000000;
@@ -145,8 +144,8 @@ void PROGRAM::run() {
                     sid, sockets->get_host(sid), sockets->get_port(sid)
                 );
 
-                if (timestamp_map.count(sid)) {
-                    timestamp_map.erase(sid);
+                if (timestamps.count(sid)) {
+                    timestamps.erase(sid);
                 }
 
                 rem_guest(sid);
@@ -159,7 +158,7 @@ void PROGRAM::run() {
                 }
             }
             else if (alert.event == SOCKETS::CONNECTION) {
-                timestamp_map[sid] = timestamp;
+                timestamps[sid] = timestamp;
 
                 SOCKETS::SESSION listener = sockets->get_listener(sid);
 
@@ -178,7 +177,7 @@ void PROGRAM::run() {
                 do_help(*this, sid, "");
             }
             else if (alert.event == SOCKETS::INCOMING) {
-                timestamp_map[sid] = timestamp;
+                timestamps[sid] = timestamp;
                 clients[sid].append(sockets->read(sid));
                 interpret(sid, clients[sid]);
             }
@@ -187,7 +186,7 @@ void PROGRAM::run() {
         uint32_t idle_timeout = 60*10;
 
         if (idle_timeout > 0 && alarmed) {
-            for (const auto &p : timestamp_map) {
+            for (const auto &p : timestamps) {
                 if (timestamp - p.second >= idle_timeout) {
                     size_t sid = p.first;
 
@@ -311,6 +310,7 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
         for (const auto &p : guests) {
             if (p.second.count(sid)) {
                 sockets->writef(p.first, "%s\n", line);
+                timestamps[p.first] = get_timestamp();
             }
         }
 

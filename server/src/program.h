@@ -84,6 +84,7 @@ class PROGRAM {
     std::unordered_map<size_t, std::string> password;
     std::unordered_map<size_t, std::unordered_set<size_t>> guests;
     std::unordered_map<size_t, std::set<std::string>> whitelist;
+    std::unordered_map<size_t, long long> timestamps;
 
     static size_t log_size;
     static bool   log_time;
