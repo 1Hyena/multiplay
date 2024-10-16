@@ -69,44 +69,44 @@ public class MultiPlayClient {
             catch (NumberFormatException e) {
                 log("Invalid port number: "+args[0]);
             }
+        }
 
-            String filename = args.length > 1 ? args[1] : "patterns.txt";
-            File file = new File(filename);
+        String filename = args.length > 1 ? args[1] : "patterns.txt";
+        File file = new File(filename);
 
-            if (file.exists() && file.canRead()) {
-                patterns = new HashMap<String, Set<String>>();
+        if (file.exists() && file.canRead()) {
+            patterns = new HashMap<String, Set<String>>();
 
-                try {
-                    List<String> lines = Files.readAllLines(
-                        Paths.get(filename)
-                    );
+            try {
+                List<String> lines = Files.readAllLines(
+                    Paths.get(filename)
+                );
 
-                    String pattern = "";
+                String pattern = "";
 
-                    for (String line : lines) {
-                        if (line.startsWith("^")) {
-                            pattern = line;
+                for (String line : lines) {
+                    if (line.startsWith("^")) {
+                        pattern = line;
 
-                            if (!patterns.containsKey(line)) {
-                                patterns.put(line, new HashSet<>());
-                            }
-                        }
-                        else if (!pattern.isEmpty() && !line.isEmpty()) {
-                            String[] parts = line.trim().split(" ", 0);
-
-                            for (String part : parts) {
-                                patterns.get(pattern).add(part.trim());
-                            }
+                        if (!patterns.containsKey(line)) {
+                            patterns.put(line, new HashSet<>());
                         }
                     }
+                    else if (!pattern.isEmpty() && !line.isEmpty()) {
+                        String[] parts = line.trim().split(" ", 0);
 
-                    if (patterns.size() == 0) {
-                        patterns = null;
+                        for (String part : parts) {
+                            patterns.get(pattern).add(part.trim());
+                        }
                     }
-                } catch (IOException e) {
-                    bug(e.toString());
+                }
+
+                if (patterns.size() == 0) {
                     patterns = null;
                 }
+            } catch (IOException e) {
+                bug(e.toString());
+                patterns = null;
             }
         }
 
@@ -147,7 +147,7 @@ public class MultiPlayClient {
                     }
 
                     try {
-                        Thread.sleep(100);
+                        Thread.sleep(10);
                     }
                     catch (InterruptedException e){
                         System.out.println(e);
@@ -346,6 +346,10 @@ public class MultiPlayClient {
     }
 
     public static void interpret_filter_line(String line) {
+        if (patterns == null) {
+            return;
+        }
+
         for (Map.Entry<String, Set<String>> entry : patterns.entrySet()) {
             Pattern pattern = Pattern.compile(entry.getKey());
             Matcher matcher = pattern.matcher(line);
