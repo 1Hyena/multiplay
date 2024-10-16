@@ -112,6 +112,7 @@ public class MultiPlayClient {
 
         exiting = new AtomicBoolean(false);
         playlist = new ConcurrentLinkedQueue<>();
+        playlist.add("alert.wav");
 
         Runtime.getRuntime().addShutdownHook(
             new Thread() {
@@ -129,7 +130,8 @@ public class MultiPlayClient {
             public void run() {
                 while (!exiting.get()) {
                     if (!playlist.isEmpty()) {
-                        File soundfile = new File(playlist.poll());
+                        String filename = playlist.poll();
+                        File soundfile = new File(filename);
 
                         if (soundfile.exists() && soundfile.canRead()) {
                             try {
@@ -144,13 +146,14 @@ public class MultiPlayClient {
                                 bug(e.toString());
                             }
                         }
+                        else log("Failed to read audio file: "+filename);
                     }
 
                     try {
                         Thread.sleep(10);
                     }
                     catch (InterruptedException e){
-                        System.out.println(e);
+                        bug(e.toString());
                     }
                 }
             }
@@ -820,14 +823,14 @@ public class MultiPlayClient {
         close_acceptor();
     }
 
-    public static void log(String text) {
+    synchronized public static void log(String text) {
         Date date = Calendar.getInstance().getTime();
         System.out.printf(
             "%1$ta %1$tb %1$td %1$tH:%1$tM:%1$tS %1$tY :: %2$s\n", date, text
         );
     }
 
-    public static void bug(String text) {
+    synchronized public static void bug(String text) {
         String methodName = new String(
             Thread.currentThread().getStackTrace()[2].getMethodName()
         );
@@ -850,6 +853,7 @@ public class MultiPlayClient {
             private boolean done = false;
             @Override public synchronized void update(LineEvent event) {
                 Type eventType = event.getType();
+
                 if (eventType == Type.STOP || eventType == Type.CLOSE) {
                     done = true;
                     notifyAll();
@@ -874,8 +878,13 @@ public class MultiPlayClient {
             clip.open(audioInputStream);
 
             try {
-                clip.start();
-                listener.waitUntilDone();
+                while (clip.getFramePosition() < clip.getFrameLength()) {
+                    long time = clip.getMicrosecondPosition();
+                    clip.setMicrosecondPosition(time);
+
+                    clip.start();
+                    listener.waitUntilDone();
+                }
             } finally {
                 clip.close();
             }
