@@ -887,7 +887,7 @@ public class MultiPlayClient {
 
                     long time_spent = (System.nanoTime() - nanotime) / 1000000;
                     long wait_time_ms = Math.min(
-                        duration - time_spent + 10, 250
+                        Math.max(duration - time_spent + 10, 1), 250
                     );
 
                     while (listener.waitUntilDone(wait_time_ms)) {
@@ -898,8 +898,14 @@ public class MultiPlayClient {
 
                         time_spent = (System.nanoTime() - nanotime) / 1000000;
                         wait_time_ms = Math.min(
-                            duration - time_spent + 10, 250
+                            Math.max(duration - time_spent + 10, 1), 250
                         );
+
+                        if (wait_time_ms == 1 && !stopping) {
+                            stopping = true;
+                            clip.stop();
+                            break;
+                        }
                     }
 
                     if (stopping) {

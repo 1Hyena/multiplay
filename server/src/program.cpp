@@ -249,6 +249,7 @@ void PROGRAM::interpret(size_t sid, std::string &input) {
                 for (const auto &p : guests) {
                     if (p.second.count(sid)) {
                         sockets->write(p.first, buf.data(), buf.size());
+                        timestamps[p.first] = get_timestamp();
                     }
                 }
             }
