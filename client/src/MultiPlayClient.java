@@ -332,7 +332,7 @@ public class MultiPlayClient {
                 interpret_filter_line(
                     new String(
                         bytes, pos, i - pos, Charset.forName("US-ASCII")
-                    ).trim()
+                    )
                 );
 
                 pos = i+1;
@@ -354,8 +354,9 @@ public class MultiPlayClient {
         }
 
         for (Map.Entry<String, Set<String>> entry : patterns.entrySet()) {
+            String trimmed = line.replaceAll("\u001B\\[[;\\d]*m", "").trim();
             Pattern pattern = Pattern.compile(entry.getKey());
-            Matcher matcher = pattern.matcher(line);
+            Matcher matcher = pattern.matcher(trimmed);
 
             if (!matcher.find()) {
                 continue;
@@ -363,7 +364,7 @@ public class MultiPlayClient {
 
             for (String param : entry.getValue()) {
                 if (param.equals("log")) {
-                    log(line);
+                    log(trimmed);
                 }
                 else if (param.startsWith("sfx:")) {
                     String sfx = param.substring(param.indexOf(":") + 1);

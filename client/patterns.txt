@@ -1,17 +1,83 @@
-^\w+ tells you '.+'$
+^([^>]+> )?You tell .+ '.+'$
+    log
+
+^([^>]+> )?You gossip '.+'$
+    log
+
+^([^>]+> )?You narrate '.+'$
+    log
+
+^([^>]+> )?You yell '.+'$
+    log
+
+^([^>]+> )?You say '.+'$
+    log
+
+^([^>]+> )?\w+ tells you '.+'$
     log sfx:alert.wav
 
-^\w+ tells the group '.+'.$
+^([^>]+> )?\w+ tells the group '.+'\.$
     log sfx:alert.wav
 
-^\w+ gossips '.+'$
+^([^>]+> )?\w+ gossips '.+'$
     log
 
-^\w+ narrates '.+'$
+^([^>]+> )?.+ narrates '.+'$
     log
 
-^\w+ yells '.+'$
+^([^>]+> )?.+ yells '.+'$
     log
 
-^\w+ says '.+'$
+^([^>]+> )?\w+ says '.+'$
     log
+
+^([^>]+> )?Your .+ (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
+    sfx:sfx/hit.wav
+
+^([^>]+> )?Your .+ (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/hurt.wav
+
+^([^>]+> )?.+'s .+ (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
+    sfx:sfx/hit.wav
+
+^([^>]+> )?.+'s .+ (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/hurt.wav
+
+^([^>]+> )?.+'s .+ (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) you(\.|!)$
+    sfx:sfx/gethit.wav
+
+^([^>]+> )?.+ (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) you(\.|!)$
+    sfx:sfx/gethurt.wav
+
+^([^>]+> )?.+ has arrived from .+\.$
+    sfx:sfx/walk-in.wav
+
+^([^>]+> )?.+ leaves .+\.$
+    sfx:sfx/walk-out.wav
+
+^([^>]+> )?.+ is dead! R.I.P.$
+    sfx:sfx/death.wav
+
+^([^>]+> )?You have been killed!!$
+    sfx:sfx/egodeath.wav
+
+^([^>]+> )?You get .+\.$
+    sfx:sfx/getitem.wav
+
+^([^>]+> )?You wear .+\.$
+    sfx:sfx/equip.wav
+
+^([^>]+> )?You buy .+ for .+ pennies\.$
+    sfx:sfx/buy.wav
+
+^([^>]+> )?You (eat|drink|quaff) .+\.$
+    sfx:sfx/consume.wav
+
+^([^>]+> )?You drop .+\.$
+    sfx:sfx/drop.wav
+
+^([^>]+> )?You get .+ (pennies|penny).*\.$
+    sfx:sfx/getgold.wav
+
+^([^>]+> )?You withdraw .+ from your account, and the bank keeps .+ as interest\.$
+    sfx:sfx/getgold.wav
