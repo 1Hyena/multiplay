@@ -41,17 +41,18 @@ public class MultiPlayClient {
     private static Socket server    = null;
     private static Socket multiplay = null;
 
-    private static int                   socket_timeout  = 1;
-    private static ByteArrayOutputStream client_command  = null;
-    private static ByteArrayOutputStream server_message  = null;
-    private static ByteArrayOutputStream filter_message  = null;
-    private static ByteArrayOutputStream multiplay_text  = null;
-    private static int                   client_port     = 4000;
-    private static boolean               initializing    = false;
-    private static int                   telnet_command  = 0;
-    private static int                   multiplay_telnet= 0;
-    private static Queue<String>         playlist        = null;
-    private static Map<String, Set<String>> patterns     = null;
+    private static int                      socket_timeout  = 1;
+    private static ByteArrayOutputStream    client_command  = null;
+    private static ByteArrayOutputStream    server_message  = null;
+    private static ByteArrayOutputStream    filter_message  = null;
+    private static ByteArrayOutputStream    multiplay_text  = null;
+    private static int                      client_port     = 4000;
+    private static boolean                  initializing    = false;
+    private static int                      telnet_command  = 0;
+    private static int                      multiplay_telnet= 0;
+    private static Queue<String>            playlist        = null;
+    private static Map<String, Set<String>> patterns        = null;
+    private static Map<String, Clip>        soundclips      = null;
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
@@ -69,6 +70,7 @@ public class MultiPlayClient {
 
         if (file.exists() && file.canRead()) {
             patterns = new LinkedHashMap<String, Set<String>>();
+            soundclips = new LinkedHashMap<String, Clip>();
 
             try {
                 List<String> lines = Files.readAllLines(
@@ -89,7 +91,29 @@ public class MultiPlayClient {
                         String[] parts = line.trim().split(" ", 0);
 
                         for (String part : parts) {
-                            patterns.get(pattern).add(part.trim());
+                            if (!part.startsWith("sfx:")) {
+                                patterns.get(pattern).add(part.trim());
+
+                                continue;
+                            }
+
+                            String sfx = part.substring(part.indexOf(":") + 1);
+
+                            if (sfx.isEmpty()) {
+                                continue;
+                            }
+
+                            File soundfile = new File(sfx);
+
+                            if (soundfile.exists() && soundfile.canRead()) {
+                                Clip clip = loadClip(soundfile);
+
+                                if (clip != null) {
+                                    patterns.get(pattern).add(part.trim());
+                                    soundclips.put(sfx, clip);
+                                }
+                            }
+                            else log("Failed to read audio file: "+sfx);
                         }
                     }
                 }
@@ -129,13 +153,12 @@ public class MultiPlayClient {
                         }
 
                         String filename = playlist.poll();
-                        File soundfile = new File(filename);
 
-                        if (soundfile.exists() && soundfile.canRead()) {
+                        if (soundclips.containsKey(filename)) {
+                            Clip clip = soundclips.get(filename);
+
                             try {
-                                playClip(soundfile);
-                            } catch (IOException e) {
-                                bug(e.toString());
+                                playClip(clip);
                             } catch (UnsupportedAudioFileException e) {
                                 bug(e.toString());
                             } catch (LineUnavailableException e) {
@@ -144,7 +167,7 @@ public class MultiPlayClient {
                                 bug(e.toString());
                             }
                         }
-                        else log("Failed to read audio file: "+filename);
+                        else bug("sound clip not loaded: "+filename);
                     }
 
                     try {
@@ -175,6 +198,10 @@ public class MultiPlayClient {
             soundplayer.join();
         } catch (InterruptedException e) {
             e.printStackTrace();
+        }
+
+        for (Map.Entry<String, Clip> entry : soundclips.entrySet()) {
+            entry.getValue().close();
         }
 
         canexit = true;
@@ -845,7 +872,44 @@ public class MultiPlayClient {
         );
     }
 
-    private static void playClip(File clipFile) throws IOException,
+    private static Clip loadClip(File clipFile) {
+        AudioInputStream audioInputStream = null;
+        Clip clip = null;
+
+        try {
+            audioInputStream = AudioSystem.getAudioInputStream(clipFile);
+
+            clip = AudioSystem.getClip();
+        } catch (UnsupportedAudioFileException e) {
+            bug(e.toString());
+        } catch (IOException e) {
+            bug(e.toString());
+        } catch (LineUnavailableException e) {
+            bug(e.toString());
+        }
+
+        if (audioInputStream != null) {
+            if (clip != null) {
+                try {
+                    clip.open(audioInputStream);
+                } catch (IOException e) {
+                    bug(e.toString());
+                } catch (LineUnavailableException e) {
+                    bug(e.toString());
+                }
+            }
+
+            try {
+                audioInputStream.close();
+            } catch (IOException e) {
+                bug(e.toString());
+            }
+        }
+
+        return clip;
+    }
+
+    private static void playClip(Clip clip) throws
     UnsupportedAudioFileException, LineUnavailableException,
     InterruptedException {
         class AudioListener implements LineListener {
@@ -868,55 +932,40 @@ public class MultiPlayClient {
         }
 
         AudioListener listener = new AudioListener();
-        AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(
-            clipFile
-        );
+        clip.addLineListener(listener);
 
-        try {
-            Clip clip = AudioSystem.getClip();
-            clip.addLineListener(listener);
-            clip.open(audioInputStream);
+        boolean stopping = false;
+        long nanotime = System.nanoTime();
+        long duration = clip.getMicrosecondLength() / 1000;
 
-            try {
-                boolean stopping = false;
-                long nanotime = System.nanoTime();
-                long duration = clip.getMicrosecondLength() / 1000;
-
-                while (clip.getFramePosition() < clip.getFrameLength()) {
-                    clip.start();
-
-                    long time_spent = (System.nanoTime() - nanotime) / 1000000;
-                    long wait_time_ms = Math.min(
-                        Math.max(duration - time_spent + 10, 1), 250
-                    );
-
-                    while (listener.waitUntilDone(wait_time_ms)) {
-                        if (!playlist.isEmpty() && !stopping) {
-                            stopping = true;
-                            clip.stop();
-                        }
-
-                        time_spent = (System.nanoTime() - nanotime) / 1000000;
-                        wait_time_ms = Math.min(
-                            Math.max(duration - time_spent + 10, 1), 250
-                        );
-
-                        if (wait_time_ms == 1 && !stopping) {
-                            stopping = true;
-                            clip.stop();
-                            break;
-                        }
-                    }
-
-                    if (stopping) {
-                        break;
-                    }
-                }
-            } finally {
-                clip.close();
+        while (clip.getFramePosition() < clip.getFrameLength()) {
+            if (stopping) {
+                break;
             }
-        } finally {
-            audioInputStream.close();
+
+            clip.start();
+
+            long time_spent = (System.nanoTime() - nanotime) / 1000000;
+            long wait_time_ms = Math.min(
+                Math.max(duration - time_spent + 10, 1), 250
+            );
+
+            while (listener.waitUntilDone(wait_time_ms)) {
+                if (!stopping
+                && (!playlist.isEmpty() || wait_time_ms == 1)) {
+                    stopping = true;
+                    clip.stop();
+                    break;
+                }
+
+                time_spent = (System.nanoTime() - nanotime) / 1000000;
+                wait_time_ms = Math.min(
+                    Math.max(duration - time_spent + 10, 1), 250
+                );
+            }
         }
+
+        clip.setFramePosition(0);
+        clip.removeLineListener(listener);
     }
 }

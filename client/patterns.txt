@@ -102,3 +102,6 @@
 
 ^([^>]+> )?You withdraw .+ from your account, and the bank keeps .+ as interest\.$
     sfx:sfx/getgold.wav
+
+^([^>]+> )?You feel fully concentrated now!$
+    sfx:sfx/recover.wav
