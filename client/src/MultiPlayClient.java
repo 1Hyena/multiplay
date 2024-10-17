@@ -5,19 +5,12 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.sound.sampled.*;
-import java.io.File;
-import java.io.IOException;
 import javax.sound.sampled.LineEvent.Type;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.List;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.HashSet;
-import java.util.Set;
+
 
 public class MultiPlayClient {
     public static String version     = "2.0";
@@ -75,7 +68,7 @@ public class MultiPlayClient {
         File file = new File(filename);
 
         if (file.exists() && file.canRead()) {
-            patterns = new HashMap<String, Set<String>>();
+            patterns = new LinkedHashMap<String, Set<String>>();
 
             try {
                 List<String> lines = Files.readAllLines(
@@ -89,7 +82,7 @@ public class MultiPlayClient {
                         pattern = line;
 
                         if (!patterns.containsKey(line)) {
-                            patterns.put(line, new HashSet<>());
+                            patterns.put(line, new LinkedHashSet<>());
                         }
                     }
                     else if (!pattern.isEmpty() && !line.isEmpty()) {
@@ -112,6 +105,7 @@ public class MultiPlayClient {
 
         exiting = new AtomicBoolean(false);
         playlist = new ConcurrentLinkedQueue<>();
+
         playlist.add("alert.wav");
 
         Runtime.getRuntime().addShutdownHook(
@@ -130,6 +124,10 @@ public class MultiPlayClient {
             public void run() {
                 while (!exiting.get()) {
                     if (!playlist.isEmpty()) {
+                        while (playlist.size() > 4) {
+                            playlist.poll();
+                        }
+
                         String filename = playlist.poll();
                         File soundfile = new File(filename);
 
@@ -860,11 +858,12 @@ public class MultiPlayClient {
                     notifyAll();
                 }
             }
-            public synchronized void waitUntilDone(
+            public synchronized boolean waitUntilDone(
+                long milliseconds
             ) throws InterruptedException {
-                while (!done) {
-                    wait();
-                }
+                wait(milliseconds);
+
+                return !done;
             }
         }
 
@@ -879,12 +878,33 @@ public class MultiPlayClient {
             clip.open(audioInputStream);
 
             try {
-                while (clip.getFramePosition() < clip.getFrameLength()) {
-                    long time = clip.getMicrosecondPosition();
-                    clip.setMicrosecondPosition(time);
+                boolean stopping = false;
+                long nanotime = System.nanoTime();
+                long duration = clip.getMicrosecondLength() / 1000;
 
+                while (clip.getFramePosition() < clip.getFrameLength()) {
                     clip.start();
-                    listener.waitUntilDone();
+
+                    long time_spent = (System.nanoTime() - nanotime) / 1000000;
+                    long wait_time_ms = Math.min(
+                        duration - time_spent + 10, 250
+                    );
+
+                    while (listener.waitUntilDone(wait_time_ms)) {
+                        if (!playlist.isEmpty() && !stopping) {
+                            stopping = true;
+                            clip.stop();
+                        }
+
+                        time_spent = (System.nanoTime() - nanotime) / 1000000;
+                        wait_time_ms = Math.min(
+                            duration - time_spent + 10, 250
+                        );
+                    }
+
+                    if (stopping) {
+                        break;
+                    }
                 }
             } finally {
                 clip.close();

@@ -31,6 +31,27 @@
 ^([^>]+> )?\w+ says '.+'$
     log
 
+^([^>]+> )?Your (.*lightning.*|shocking grasp) (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
+    sfx:sfx/lightning-hit.wav
+
+^([^>]+> )?Your (.*lightning.*|shocking grasp) (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/lightning-hit.wav sfx:sfx/lightning-dam.wav
+
+^([^>]+> )?Your fireball (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
+    sfx:sfx/fireball-hit.wav
+
+^([^>]+> )?Your fireball (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/fireball-hit.wav sfx:sfx/fire-hurt.wav
+
+^([^>]+> )?Your (torments|burning hands|blast of fire) (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
+    sfx:sfx/fire-hit.wav
+
+^([^>]+> )?Your (torments|burning hands|blast of fire) (demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/fire-hit.wav sfx:sfx/fire-hurt.wav
+
+^([^>]+> )?Your (chilling touch|blast of frost) (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles|demolishes|devastates|obliterates|annihilates|Eradicates|does UNSPEAKABLE things to) .+(\.|!)$
+    sfx:sfx/cold-hit.wav
+
 ^([^>]+> )?Your .+ (scratches|grazes|hits|injures|wounds|mauls|decimates|maims|mutilates|disembowels|dismembers|massacres|mangles) .+(\.|!)$
     sfx:sfx/hit.wav
 
