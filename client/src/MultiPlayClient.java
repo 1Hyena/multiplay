@@ -10,7 +10,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-
+import java.util.zip.CRC32;
+import java.util.zip.Checksum;
 
 public class MultiPlayClient {
     public static String version     = "2.0";
@@ -41,18 +42,21 @@ public class MultiPlayClient {
     private static Socket server    = null;
     private static Socket multiplay = null;
 
-    private static int                      socket_timeout  = 1;
-    private static ByteArrayOutputStream    client_command  = null;
-    private static ByteArrayOutputStream    server_message  = null;
-    private static ByteArrayOutputStream    filter_message  = null;
-    private static ByteArrayOutputStream    multiplay_text  = null;
-    private static int                      client_port     = 4000;
-    private static boolean                  initializing    = false;
-    private static int                      telnet_command  = 0;
-    private static int                      multiplay_telnet= 0;
-    private static Queue<String>            playlist        = null;
-    private static Map<String, Set<String>> patterns        = null;
-    private static Map<String, Clip>        soundclips      = null;
+    private static int                      socket_timeout     = 1;
+    private static ByteArrayOutputStream    client_command     = null;
+    private static ByteArrayOutputStream    server_message     = null;
+    private static ByteArrayOutputStream    filter_message     = null;
+    private static ByteArrayOutputStream    multiplay_text     = null;
+    private static int                      client_port        = 4000;
+    private static boolean                  initializing       = false;
+    private static int                      telnet_command     = 0;
+    private static int                      multiplay_telnet   = 0;
+    private static Queue<String>            playlist           = null;
+    private static Map<String, Set<String>> patterns           = null;
+    private static Map<String, Clip>        soundclips         = null;
+    private static long                     patterns_crc32     = 0;
+    private static long                     patterns_timestamp = 0;
+    private static String                   patterns_filepath  = null;
 
     public static void main(String[] args) throws IOException {
         if (args.length > 0) {
@@ -61,85 +65,25 @@ public class MultiPlayClient {
                 client_port = port;
             }
             catch (NumberFormatException e) {
-                log("Invalid port number: "+args[0]);
+                log("invalid port number: "+args[0]);
             }
         }
 
-        String filename = args.length > 1 ? args[1] : "patterns.txt";
-        File file = new File(filename);
-
-        if (file.exists() && file.canRead()) {
-            patterns = new LinkedHashMap<String, Set<String>>();
-            soundclips = new LinkedHashMap<String, Clip>();
-
-            try {
-                List<String> lines = Files.readAllLines(
-                    Paths.get(filename)
-                );
-
-                String pattern = "";
-
-                for (String line : lines) {
-                    if (line.startsWith("^")) {
-                        pattern = line;
-
-                        if (!patterns.containsKey(line)) {
-                            patterns.put(line, new LinkedHashSet<>());
-                        }
-                    }
-                    else if (!pattern.isEmpty() && !line.isEmpty()) {
-                        String[] parts = line.trim().split(" ", 0);
-
-                        for (String part : parts) {
-                            if (!part.startsWith("sfx:")) {
-                                patterns.get(pattern).add(part.trim());
-
-                                continue;
-                            }
-
-                            String sfx = part.substring(part.indexOf(":") + 1);
-
-                            if (sfx.isEmpty()) {
-                                continue;
-                            }
-
-                            File soundfile = new File(sfx);
-
-                            if (soundfile.exists() && soundfile.canRead()) {
-                                Clip clip = loadClip(soundfile);
-
-                                if (clip != null) {
-                                    patterns.get(pattern).add(part.trim());
-                                    soundclips.put(sfx, clip);
-                                }
-                            }
-                            else log("Failed to read audio file: "+sfx);
-                        }
-                    }
-                }
-
-                if (patterns.size() == 0) {
-                    patterns = null;
-                }
-            } catch (IOException e) {
-                bug(e.toString());
-                patterns = null;
-            }
+        if (args.length > 1) {
+            load_patterns(args[1]);
         }
 
         exiting = new AtomicBoolean(false);
         playlist = new ConcurrentLinkedQueue<>();
 
-        playlist.add("alert.wav");
-
         Runtime.getRuntime().addShutdownHook(
             new Thread() {
                 @Override
                 public void run() {
-                    log("Shutdown sequence initiated.");
+                    log("shutdown sequence initiated");
                     doexit = true;
                     while (!canexit) Thread.yield();
-                    log("MultiPlay Client has finished.");
+                    log("MultiPlay Client has finished");
                 }
             }
         );
@@ -147,7 +91,7 @@ public class MultiPlayClient {
         Thread soundplayer = new Thread() {
             public void run() {
                 while (!exiting.get()) {
-                    if (!playlist.isEmpty()) {
+                    if (!playlist.isEmpty() && soundclips != null) {
                         while (playlist.size() > 4) {
                             playlist.poll();
                         }
@@ -182,7 +126,7 @@ public class MultiPlayClient {
         soundplayer.start();
 
         try {
-            log("Starting MultiPlay Client v"+version+".");
+            log("starting MultiPlay Client v"+version);
             runServer();
         } catch (Exception e) {
             StringWriter sw = new StringWriter();
@@ -200,8 +144,10 @@ public class MultiPlayClient {
             e.printStackTrace();
         }
 
-        for (Map.Entry<String, Clip> entry : soundclips.entrySet()) {
-            entry.getValue().close();
+        if (soundclips != null) {
+            for (Map.Entry<String, Clip> entry : soundclips.entrySet()) {
+                entry.getValue().close();
+            }
         }
 
         canexit = true;
@@ -218,6 +164,18 @@ public class MultiPlayClient {
             while (step_multiplay());
             while (step_server());
             while (step_client());
+
+            if (System.nanoTime() / 1000000000 - patterns_timestamp > 10
+            && patterns_filepath != null) {
+                long crc32 = crc32(patterns_filepath);
+
+                if (crc32 != patterns_crc32
+                && !load_patterns(patterns_filepath)) {
+                    log("failed to reload patterns from "+patterns_filepath);
+                }
+
+                patterns_timestamp = System.nanoTime() / 1000000000;
+            }
 
             try {
                 Thread.sleep(longsleep ? 1000 : socket_timeout);
@@ -285,6 +243,12 @@ public class MultiPlayClient {
             }
             else {
                 initializing = false;
+
+                if (patterns == null) {
+                    if (!load_patterns(answers[0]+".txt")) {
+                        load_patterns("patterns.txt");
+                    }
+                }
             }
 
             return;
@@ -325,13 +289,16 @@ public class MultiPlayClient {
             }
         }
         else {
+            String cmdstr = new String(command, Charset.forName("US-ASCII"));
+
             if (client != null) {
                 send_bytes(client, command);
                 send_byte(client, '\n');
                 send_byte(client, '\r');
+
+                interpret_filter_line(cmdstr);
             }
 
-            String cmdstr = new String(command, Charset.forName("US-ASCII"));
             String cmpstr = new String(
                 "Channel '"+answers[MPC_NAME]+"' already exists."
             );
@@ -478,14 +445,13 @@ public class MultiPlayClient {
             next_byte = client.getInputStream().read();
 
             if (next_byte == -1) {
-                log("Connection #"+client_nr+" lost.");
+                log("connection #"+client_nr+" lost");
             }
         } catch (SocketTimeoutException e) {
             return false;
         } catch (IOException e) {
             log(
-                "An error occurred while reading from connection #"+
-                client_nr+"."
+                "an error occurred while reading from connection #"+client_nr
             );
 
             bug(e.toString());
@@ -517,7 +483,7 @@ public class MultiPlayClient {
                     return true;
                 }
                 else {
-                    log("Command too long, closing!");
+                    log("command too long, closing");
                 }
             }
         }
@@ -573,12 +539,12 @@ public class MultiPlayClient {
             next_byte = multiplay.getInputStream().read();
 
             if (next_byte == -1) {
-                log("MultiPlay server disconnected us.");
+                log("MultiPlay server disconnected us");
             }
         } catch (SocketTimeoutException e) {
             return false;
         } catch (IOException e) {
-            log("An error occurred while reading from the MultiPlay server.");
+            log("an error occurred while reading from the MultiPlay server");
             bug(e.toString());
         }
 
@@ -610,7 +576,7 @@ public class MultiPlayClient {
                     return true;
                 }
                 else {
-                    log("Message from MultiPlay too long, closing!");
+                    log("message from MultiPlay too long, closing");
                 }
             }
         }
@@ -668,12 +634,12 @@ public class MultiPlayClient {
             next_byte = server.getInputStream().read();
 
             if (next_byte == -1) {
-                log("MUD server disconnected us.");
+                log("MUD server disconnected us");
             }
         } catch (SocketTimeoutException e) {
             return false;
         } catch (IOException e) {
-            log("An error occurred while reading from the MUD server.");
+            log("an error occurred while reading from the MUD server");
             bug(e.toString());
         }
 
@@ -695,9 +661,9 @@ public class MultiPlayClient {
         try {
             acceptor = new ServerSocket(port);
             acceptor.setSoTimeout(1000);
-            log("Started listening on port "+acceptor.getLocalPort()+".");
+            log("started listening on port "+acceptor.getLocalPort());
         } catch (IOException e) {
-            log("Failed to start listening on port "+port+".");
+            log("failed to start listening on port "+port);
             bug(e.toString());
         }
 
@@ -725,9 +691,8 @@ public class MultiPlayClient {
             answers[MPS_PORT] = "4000";
 
             log(
-                "New connection #"+client_nr+" from "+
-                client.getInetAddress().getHostAddress()+":"+client.getPort()+
-                "."
+                "new connection #"+client_nr+" from "+
+                client.getInetAddress().getHostAddress()+":"+client.getPort()
             );
 
             client.setSoTimeout(socket_timeout);
@@ -735,7 +700,7 @@ public class MultiPlayClient {
         } catch (SocketTimeoutException e) {
             //log("No one connected.");
         } catch (IOException e) {
-            log("An error occurred while waiting for a connection.");
+            log("an error occurred while waiting for a connection");
             bug(e.toString());
         }
 
@@ -749,8 +714,7 @@ public class MultiPlayClient {
             s = new Socket(host, Integer.parseInt(port));
             s.setSoTimeout(socket_timeout);
             log(
-                "Connected to "+s.getInetAddress().getHostName()+":"+
-                s.getPort()+"."
+                "connected to "+s.getInetAddress().getHostName()+":"+s.getPort()
             );
         } catch (ConnectException e) {
             return null;
@@ -768,13 +732,13 @@ public class MultiPlayClient {
         try {
             client.close();
             log(
-                "Disconnected client #"+client_nr+" ("+
+                "disconnected client #"+client_nr+" ("+
                 client.getInetAddress().getHostAddress()+":"+client.getPort()+
-                ")."
+                ")"
             );
         }
         catch (IOException e) {
-            log("An error occurred while disconnecting client #"+client_nr+".");
+            log("an error occurred while disconnecting client #"+client_nr);
             bug(e.toString());
         }
 
@@ -792,10 +756,10 @@ public class MultiPlayClient {
 
         try {
             server.close();
-            log("Disconnected from "+place+".");
+            log("disconnected from "+place);
         }
         catch (IOException e) {
-            log("An error occurred while disconnecting from "+place+".");
+            log("an error occurred while disconnecting from "+place);
             bug(e.toString());
         }
 
@@ -813,10 +777,10 @@ public class MultiPlayClient {
 
         try {
             multiplay.close();
-            log("Disconnected from "+place+" (multiplay).");
+            log("disconnected from "+place+" (MultiPlay)");
         }
         catch (IOException e) {
-            log("An error occurred while disconnecting from "+place+".");
+            log("an error occurred while disconnecting from "+place);
             bug(e.toString());
         }
 
@@ -832,10 +796,10 @@ public class MultiPlayClient {
 
         try {
             acceptor.close();
-            log("Stopped listening on port "+place+".");
+            log("stopped listening on port "+place);
         }
         catch (IOException e) {
-            log("An error occurred while closing port "+place+".");
+            log("an error occurred while closing port "+place);
             bug(e.toString());
         }
 
@@ -872,7 +836,90 @@ public class MultiPlayClient {
         );
     }
 
-    private static Clip loadClip(File clipFile) {
+    public static boolean load_patterns(String filepath) {
+        File file = new File(filepath);
+
+        if (!file.exists() || !file.canRead()) {
+            return false;
+        }
+
+        if (soundclips != null) {
+            for (Map.Entry<String, Clip> entry : soundclips.entrySet()) {
+                entry.getValue().close();
+            }
+        }
+
+        patterns = new LinkedHashMap<String, Set<String>>();
+        soundclips = new LinkedHashMap<String, Clip>();
+
+        try {
+            List<String> lines = Files.readAllLines(
+                Paths.get(filepath)
+            );
+
+            String pattern = "";
+
+            for (String line : lines) {
+                if (line.startsWith("^")) {
+                    pattern = line;
+
+                    if (!patterns.containsKey(line)) {
+                        patterns.put(line, new LinkedHashSet<>());
+                    }
+                }
+                else if (!pattern.isEmpty() && !line.isEmpty()) {
+                    String[] parts = line.trim().split(" ", 0);
+
+                    for (String part : parts) {
+                        if (!part.startsWith("sfx:")) {
+                            patterns.get(pattern).add(part.trim());
+
+                            continue;
+                        }
+
+                        String sfx = part.substring(part.indexOf(":") + 1);
+
+                        if (sfx.isEmpty()) {
+                            continue;
+                        }
+
+                        File soundfile = new File(sfx);
+
+                        if (soundfile.exists() && soundfile.canRead()) {
+                            Clip clip = load_clip(soundfile);
+
+                            if (clip != null) {
+                                patterns.get(pattern).add(part.trim());
+                                soundclips.put(sfx, clip);
+                            }
+                        }
+                        else log("failed to read audio file: "+sfx);
+                    }
+                }
+            }
+
+            if (patterns.size() == 0) {
+                patterns = null;
+                soundclips = null;
+            }
+        } catch (IOException e) {
+            bug(e.toString());
+            patterns = null;
+            soundclips = null;
+        }
+
+        if (patterns != null) {
+            patterns_filepath = filepath;
+            patterns_timestamp = System.nanoTime() / 1000000000;
+            patterns_crc32 = crc32(filepath);
+
+            log("loaded patterns from '"+filepath+"'");
+        }
+
+        return patterns != null;
+    }
+
+    private static Clip load_clip(File clipFile) {
         AudioInputStream audioInputStream = null;
         Clip clip = null;
 
@@ -967,5 +1014,29 @@ public class MultiPlayClient {
 
         clip.setFramePosition(0);
         clip.removeLineListener(listener);
+    }
+
+    public static long crc32(String fpath) {
+        Checksum checksum = new CRC32();
+
+        try {
+            BufferedInputStream is = new BufferedInputStream(
+                new FileInputStream(fpath)
+            );
+
+            byte[] bytes = new byte[1024];
+            int len = 0;
+
+            while ((len = is.read(bytes)) >= 0) {
+                checksum.update(bytes, 0, len);
+            }
+
+            is.close();
+        }
+        catch (IOException e) {
+            bug(e.toString());
+        }
+
+        return checksum.getValue();
     }
 }
