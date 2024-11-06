@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class MultiPlayClient {
     public static String version     = "2.0";
@@ -41,6 +43,7 @@ public class MultiPlayClient {
     private static Socket client    = null;
     private static Socket server    = null;
     private static Socket multiplay = null;
+    private static FileWriter logwriter = null;
 
     private static int                      socket_timeout     = 1;
     private static ByteArrayOutputStream    client_command     = null;
@@ -296,7 +299,7 @@ public class MultiPlayClient {
                 send_byte(client, '\n');
                 send_byte(client, '\r');
 
-                interpret_filter_line(cmdstr);
+                interpret_filter_line(cmdstr, false);
             }
 
             String cmpstr = new String(
@@ -324,7 +327,7 @@ public class MultiPlayClient {
                 interpret_filter_line(
                     new String(
                         bytes, pos, i - pos, Charset.forName("US-ASCII")
-                    )
+                    ), true
                 );
 
                 pos = i+1;
@@ -340,13 +343,27 @@ public class MultiPlayClient {
         return remaining;
     }
 
-    public static void interpret_filter_line(String line) {
+    public static void interpret_filter_line(String line, boolean logging) {
+        line = line.replaceAll("\u001B\\[[;\\d]*m", "");
+        line = line.replaceAll("\u001B\\[2J", "");
+        line = line.replaceAll("\uFFFD+\u0001", "");
+        line = line.replaceAll("\\r", "");
+
+        if (logging && logwriter != null) {
+            try {
+                logwriter.write(line+"\n");
+            } catch (IOException e) {
+                bug(e.toString());
+                close_logwriter();
+            }
+        }
+
         if (patterns == null) {
             return;
         }
 
         for (Map.Entry<String, Set<String>> entry : patterns.entrySet()) {
-            String trimmed = line.replaceAll("\u001B\\[[;\\d]*m", "").trim();
+            String trimmed = line.trim();
             Pattern pattern = Pattern.compile(entry.getKey());
             Matcher matcher = pattern.matcher(trimmed);
 
@@ -434,6 +451,15 @@ public class MultiPlayClient {
             }
 
             filter_message = interpret_filter(filter_message);
+
+            if (logwriter != null) {
+                try {
+                    logwriter.flush();
+                } catch (IOException e) {
+                    bug(e.toString());
+                    close_logwriter();
+                }
+            }
 
             server_message.reset();
         }
@@ -616,6 +642,24 @@ public class MultiPlayClient {
                     }
                 }
                 else {
+                    if (logwriter == null) {
+                        DateTimeFormatter dtf = DateTimeFormatter.ofPattern(
+                            "dd.MM.uuuu HH:mm:ss"
+                        );
+
+                        ZonedDateTime now = ZonedDateTime.now();
+
+                        try {
+                            logwriter = new FileWriter("log.txt", false);
+                            logwriter.write(
+                                "Logging started on "+dtf.format(now)+".\n"
+                            );
+                        }
+                        catch (IOException e) {
+                            bug(e.toString());
+                        }
+                    }
+
                     send(
                         client,
                         "You are now multiplaying like a boss!\n\r"+
@@ -806,11 +850,25 @@ public class MultiPlayClient {
         acceptor = null;
     }
 
+    public static void close_logwriter() {
+        if (logwriter != null) {
+            try {
+                logwriter.close();
+            }
+            catch (IOException e) {
+                bug(e.toString());
+            }
+
+            logwriter = null;
+        }
+    }
+
     public static void close_all() {
         close_multiplay();
         close_server();
         close_client();
         close_acceptor();
+        close_logwriter();
     }
 
     synchronized public static void log(String text) {
